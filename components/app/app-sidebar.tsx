@@ -16,6 +16,7 @@ import {
   Megaphone,
   Users,
   Settings,
+  Smartphone,
 } from 'lucide-react'
 import { Logo } from '@/components/shared/logo'
 import { cn } from '@/lib/utils'
@@ -35,6 +36,7 @@ const groups: { label: string; items: { label: string; href: string; icon: React
     items: [
       { label: 'Message Builder', href: '/app/message-builder', icon: PencilRuler },
       { label: 'Journey Builder', href: '/app/journeys', icon: Workflow },
+      { label: 'Customer flows', href: '/app/flows', icon: Smartphone },
       { label: 'Templates', href: '/app/templates', icon: LayoutTemplate },
       { label: 'Brand & identity', href: '/app/brand', icon: BadgeCheck },
     ],

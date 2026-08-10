@@ -360,6 +360,157 @@ export function BookingConfirmedPreview({
   )
 }
 
+/* ---------- Verified brand identity sheet (§22.1) ---------- */
+
+export function BrandSheetPreview({
+  name,
+  category,
+  phone,
+  website,
+  privacy,
+}: {
+  name: string
+  category: string
+  phone: string
+  website: string
+  privacy: string
+}) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-white rcx-shadow">
+      <div className="flex flex-col items-center gap-1.5 border-b border-border px-4 py-4">
+        <div className="flex size-12 items-center justify-center rounded-full bg-navy text-sm font-bold text-white">
+          NA
+        </div>
+        <div className="flex items-center gap-1">
+          <p className="text-[13px] font-semibold text-foreground">{name}</p>
+          <BadgeCheck className="size-4 text-signal-blue" aria-label="Verified sender" />
+        </div>
+        <p className="text-[11px] text-muted-foreground">{category}</p>
+        <span className="mt-1 rounded-full bg-success/12 px-2 py-0.5 text-[10px] font-medium text-success">
+          Verified business
+        </span>
+      </div>
+      <dl className="divide-y divide-border">
+        {[
+          { icon: <Phone className="size-3.5" />, label: 'Phone', value: phone },
+          { icon: <ShieldCheck className="size-3.5" />, label: 'Website', value: website },
+          { icon: <Lock className="size-3.5" />, label: 'Privacy', value: privacy },
+        ].map((row) => (
+          <div key={row.label} className="flex items-center gap-2.5 px-4 py-2.5">
+            <span className="text-muted-foreground">{row.icon}</span>
+            <dt className="sr-only">{row.label}</dt>
+            <dd className="truncate text-[12px] text-foreground">{row.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
+/* ---------- Itemised quote / invoice (§22.4) ---------- */
+
+export function QuotePreview({
+  title,
+  items,
+  actions,
+  brandColor,
+}: {
+  title: string
+  items: { label: string; price: string; recommended?: boolean }[]
+  actions: string[]
+  brandColor?: string
+}) {
+  const accent = brandColor ?? 'var(--violet)'
+  return (
+    <div className="max-w-[86%]">
+      <div className="overflow-hidden rounded-2xl rounded-bl-md border border-border bg-white rcx-shadow">
+        <p className="border-b border-border px-3.5 py-2.5 text-[12px] font-semibold text-foreground">{title}</p>
+        <ul className="divide-y divide-border">
+          {items.map((it) => (
+            <li key={it.label} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
+              <span className="min-w-0 text-[12px] text-foreground">
+                {it.label}
+                {it.recommended && (
+                  <span className="ml-1.5 rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-medium text-[#8a6210]">
+                    Recommended
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 text-[12px] font-semibold tabular-nums text-foreground">{it.price}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="flex flex-col border-t border-border">
+          {actions.map((a, i) => (
+            <button
+              key={a}
+              className={cn(
+                'py-2.5 text-[12px] font-medium transition-colors hover:bg-accent',
+                i > 0 && 'border-t border-border',
+              )}
+              style={{ color: i === 0 ? accent : 'var(--muted-foreground)' }}
+            >
+              {a}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ---------- Order / delivery tracker (§22.5) ---------- */
+
+export function TrackerPreview({
+  title,
+  steps,
+  note,
+}: {
+  title: string
+  steps: { label: string; done: boolean }[]
+  note?: string
+}) {
+  return (
+    <div className="max-w-[86%]">
+      <div className="overflow-hidden rounded-2xl rounded-bl-md border border-border bg-white rcx-shadow">
+        <p className="border-b border-border px-3.5 py-2.5 text-[12px] font-semibold text-foreground">{title}</p>
+        <ol className="space-y-0 px-3.5 py-3">
+          {steps.map((s, i) => (
+            <li key={s.label} className="flex gap-2.5">
+              <div className="flex flex-col items-center">
+                <span
+                  className={cn(
+                    'grid size-4 shrink-0 place-items-center rounded-full border',
+                    s.done ? 'border-success bg-success text-white' : 'border-border bg-white',
+                  )}
+                >
+                  {s.done && <Check className="size-2.5" />}
+                </span>
+                {i < steps.length - 1 && (
+                  <span className={cn('h-5 w-px', s.done ? 'bg-success' : 'bg-border')} />
+                )}
+              </div>
+              <span
+                className={cn(
+                  'pb-2 text-[12px] leading-4',
+                  s.done ? 'text-foreground' : 'text-muted-foreground',
+                )}
+              >
+                {s.label}
+              </span>
+            </li>
+          ))}
+        </ol>
+        {note && (
+          <p className="border-t border-border bg-secondary/50 px-3.5 py-2 text-[11px] text-muted-foreground">
+            {note}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ---------- Animation wrapper ---------- */
 
 export function AnimatedMessage({
