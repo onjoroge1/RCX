@@ -3110,14 +3110,27 @@ If this Markdown file is being supplied directly to an AI coding agent, use:
 **Method:** full source read, `tsc --noEmit`, HTTP smoke test of all 25 routes, browser verification of rendered pages.
 **Not yet under version control** — the repo has zero commits.
 
-## 41.1 Missing spec inputs
+## 41.1 Missing spec inputs — resolved 2026-08-09
 
 Two directories this document treats as sources of truth **do not exist in the repo**:
 
 - `./renderings/` — the visual source of truth referenced by §5 and §40
 - `./reference-prototype/` — referenced by §39
 
-The build so far derives its visual system from §6 tokens only. Anyone continuing this work has no rendering to check against.
+**Decision: do not recreate either. Both are obsolete, for different reasons.**
+
+`reference-prototype/` was meant to be a prior build to compare against. **The repo itself is now that artifact.** §39's instruction ("functional/layout reference only; this specification wins any conflict") is satisfied by the working app. Treat §39 as spent.
+
+`renderings/` was an *input* to a build that has already happened. Generating images now would invert the dependency — producing a design target from the implementation it was supposed to guide — and would leave two sources of truth that can drift apart. Note also that **§5.5 already anticipated this**: it says to recreate the customer-facing RCS examples "as HTML/CSS device previews where practical rather than relying only on raster screenshots." The §22 flow player does exactly that, so the most valuable renderings are now live code.
+
+What replaces them:
+
+1. **A living style guide route** — tokens, type scale, spacing, and the component inventory rendered from the real components. Cannot go stale the way a PNG can. This is the honest successor to §5.1's reference board.
+2. **Committed screenshots of the running app** under `renderings/`, if a visual baseline is wanted for regression comparison. Cheap, and satisfies §5 without claiming to be a design authority.
+
+What to avoid: generating AI mockups to fill the folder. They would be fiction contradicting a working app, and §5's "primary style and layout target" would then point at something nobody built.
+
+**Caveat, and the one thing worth a human decision:** if a specific visual direction was envisioned that the current build does *not* match, there is no way to detect that from inside the repo. Reviewing the running app against that intent is a judgement call only the product owner can make.
 
 ## 41.2 Fixed in this pass
 
