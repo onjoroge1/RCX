@@ -3,6 +3,27 @@
 **Companion to:** `RCX_AI_BUILD_SPEC.md` (product/UX source of truth) and its §41 audit.
 **Created:** 2026-08-09
 
+> ## ⚠️ PARTIALLY SUPERSEDED — 2026-08-13
+>
+> The product owner has decided RCX becomes a **real production application**, not a prototype.
+> A Neon Postgres database, Auth.js v5 authentication, multi-tenancy and an admin surface are
+> now **in scope**.
+>
+> **§0.2, §0.3 and §6 of this document are void.** Specifically, §6's *"What not to build: …
+> real auth, real persistence, and a real backend"* is reversed, as is the §0 chain it rests on
+> (spec §0.5, "mocked local data only").
+>
+> **Still valid:** §1 Phase 0.4 (primitives) and 0.5 (route state files) — both now *more*
+> important, since forms submit to server actions. §2 Phase 1 (§22 flows — since delivered),
+> and the §3–§5 feature backlog, which is unaffected by where the data comes from.
+>
+> **Also revised:** Phase 0.2 (re-model `data/mock.ts`) is superseded *as an edit* — the
+> strings→types transformation now happens once inside the database seed, and `data/mock.ts`
+> is deleted rather than rewritten. Phase 0.3 (`data/repo.ts`) is dropped entirely; a real
+> async data-access layer serves its purpose.
+>
+> See `RCX_AI_BUILD_SPEC.md` §42 for the production architecture.
+
 ---
 
 ## 0. Operating assumptions

@@ -3202,3 +3202,62 @@ Ranked by how much later rework each one prevents.
 - **P2** — campaign 4-step builder; settings Consent + Billing; onboarding (§9.2); secondary marketing routes; §27 states across all pages.
 
 **§37 demo path check.** The stated sales sequence — dashboard → open Service Reminder journey → inspect rich message → toggle RCS/SMS → test journey → open conversation → take over → analytics → integrations and API logs — is **walkable end to end today**, with one seam: "open Service Reminder journey" lands on a generic builder rather than that specific journey, because per-journey routes do not exist.
+
+---
+
+# 42. PRODUCTION ARCHITECTURE — ADOPTED 2026-08-13
+
+## 42.1 What changed
+
+§0.5 ("mocked local data only") and §0.12 ("do not require live RCS credentials") were written
+for a prototype. RCX is now being built as a **real production application**. §0.5 is void.
+
+§0.12 is **partially** retained and worth stating precisely: no RCS aggregator credentials are
+required — messaging is simulated behind a provider adapter. But the repo now requires a
+`DATABASE_URL` to run, so the "clone and run with zero setup" property is gone. Setup steps
+belong in the README.
+
+## 42.2 Stack decisions
+
+| Area | Decision |
+|---|---|
+| Database | Neon Postgres (serverless) |
+| ORM | Drizzle + Neon driver — **two clients**: HTTP for reads, pooled WebSocket for transactions |
+| Auth | Auth.js v5, database session strategy |
+| Tenancy | Multi-tenant with test/live environments from migration 0000 |
+| Messaging | Simulated provider behind `MessagingProvider`; Sinch/Twilio adapters stubbed |
+| Demo access | Seeded demo user + one-click sign-in (keeps §37 clickable behind real auth) |
+| Public API | Console UI first over real internal data; `/api/v1` deferred |
+| Marketing copy | Stays in code — no CMS |
+
+## 42.3 The two decisions most expensive to reverse
+
+**Authoring artifacts are not environment-scoped; runtime artifacts are.** `journeys`,
+`messages` and `templates` carry no `environment` column — otherwise every artifact forks into
+two divergent copies and §13.3's "promote to live" becomes unexpressible. `contacts`,
+`conversations`, `journey_runs`, `campaigns` and `api_keys` *are* environment-scoped. The bridge
+is `journey_publications (journey_id, environment, version_id)`.
+
+**Tenant scoping is a convention, enforced by review and CI.** No function in `lib/db/queries/`
+accepts a `workspaceId` argument; each calls `getScope()` itself. One exception and the rule
+stops being checkable. Postgres RLS is deliberately **not** implemented — the HTTP driver cannot
+hold `SET LOCAL` across statements — and this is recorded as a known gap rather than
+half-built.
+
+## 42.4 Relationship to §25
+
+§25's type sketches are honoured in spirit, not literally. Three deliberate departures:
+
+- **§25.6 `Journey.metrics` inline** — dropped. Metrics derive from `journey_runs` and
+  `outcomes`, cached in `metric_journey_daily`. Inline counters go stale.
+- **§25.4 `Conversation.messages[]` nested** — becomes a `conversation_messages` table.
+- **Vehicles / invoices / orders / work orders** referenced throughout §22 — modelled as one
+  `contact_records` table with a `record_type`, not six vertical tables. §16 is explicit that
+  RCX does not replace a CRM, so the schema models the *mirror*, not the system of record.
+
+## 42.5 §21.3 is a display spec, not an authorization model
+
+The nine permissions listed in §21.3 do not cover the Support Agent role at all — nothing there
+describes handling a conversation. The implemented model is a superset
+(`conversation.view`, `conversation.takeover`, `contact.edit`, `template.approve`), while the
+settings matrix UI continues to show the nine §21.3 rows.
