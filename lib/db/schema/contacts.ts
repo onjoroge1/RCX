@@ -40,7 +40,8 @@ export const contacts = pgTable(
     displayName: text().generatedAlwaysAs(
       sql`trim(both ' ' from coalesce(first_name, '') || ' ' || coalesce(last_name, ''))`,
     ),
-    phoneE164: text().notNull(),
+    // Explicit name: drizzle's snake_case casing would emit `phone_e_164`.
+    phoneE164: text('phone_e164').notNull(),
     country: text(),
     language: text().notNull().default('en'),
     timezone: text(),
@@ -171,7 +172,8 @@ export const suppressions = pgTable(
       .notNull()
       .references(() => workspaces.id, { onDelete: 'cascade' }),
     environment: environmentEnum().notNull(),
-    phoneE164: text().notNull(),
+    // Explicit name: drizzle's snake_case casing would emit `phone_e_164`.
+    phoneE164: text('phone_e164').notNull(),
     reason: text().notNull(),
     source: consentSourceEnum(),
     expiresAt: timestamp({ withTimezone: true }),

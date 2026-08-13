@@ -101,7 +101,8 @@ export const brandTestDevices = pgTable(
     brandAgentId: text()
       .notNull()
       .references(() => brandAgents.id, { onDelete: 'cascade' }),
-    phoneE164: text().notNull(),
+    // Explicit name: drizzle's snake_case casing would emit `phone_e_164`.
+    phoneE164: text('phone_e164').notNull(),
     label: text(),
     capability: text(),
     addedByUserId: text().references(() => users.id, { onDelete: 'set null' }),
