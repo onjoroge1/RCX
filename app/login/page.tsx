@@ -6,6 +6,17 @@ export const metadata: Metadata = {
   description: 'Sign in to your RCX operating workspace.',
 }
 
-export default function Page() {
-  return <AuthPanel mode="login" />
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>
+}) {
+  const { next } = await searchParams
+  return (
+    <AuthPanel
+      mode="login"
+      next={next}
+      demoEnabled={Boolean(process.env.DEMO_USER_EMAIL && process.env.DEMO_USER_PASSWORD)}
+    />
+  )
 }

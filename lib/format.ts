@@ -110,3 +110,14 @@ export function formatPhone(e164: string | null | undefined): string {
   const match = /^\+1(\d{3})(\d{3})(\d{4})$/.exec(e164)
   return match ? `+1 (${match[1]}) ${match[2]}-${match[3]}` : e164
 }
+
+/** URL-safe slug for workspace and organization names. May return ''. */
+export function slugify(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+}

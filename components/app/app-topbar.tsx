@@ -3,9 +3,10 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Menu, Search, Bell, ChevronRight, FlaskConical } from 'lucide-react'
+import { Menu, Search, Bell, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/theme-toggle'
+import { EnvironmentSwitcher } from './environment-switcher'
 
 const labels: Record<string, string> = {
   overview: 'Overview',
@@ -52,10 +53,7 @@ export function AppTopbar({ onMenu }: { onMenu: () => void }) {
       </nav>
 
       <div className="ml-auto flex items-center gap-2">
-        <span className="hidden items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning sm:inline-flex">
-          <FlaskConical className="size-3.5" />
-          Sandbox
-        </span>
+        <EnvironmentSwitcher />
         <div className="relative hidden md:block">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <input

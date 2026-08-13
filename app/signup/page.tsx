@@ -3,9 +3,14 @@ import { AuthPanel } from '@/components/marketing/auth-panel'
 
 export const metadata: Metadata = {
   title: 'Get started — RCX',
-  description: 'Create your RCX workspace and start building RCS journeys.',
+  description: 'Create your RCX workspace.',
 }
 
 export default function Page() {
-  return <AuthPanel mode="signup" />
+  return (
+    <AuthPanel
+      mode="signup"
+      demoEnabled={Boolean(process.env.DEMO_USER_EMAIL && process.env.DEMO_USER_PASSWORD)}
+    />
+  )
 }

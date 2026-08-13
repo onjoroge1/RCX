@@ -17,8 +17,11 @@ import {
   Users,
   Settings,
   Smartphone,
+  LogOut,
 } from 'lucide-react'
 import { Logo } from '@/components/shared/logo'
+import { signOutAction } from '@/lib/actions/auth'
+import { initialsOf, useSession } from './session-context'
 import { cn } from '@/lib/utils'
 
 const groups: { label: string; items: { label: string; href: string; icon: React.ElementType }[] }[] = [
@@ -54,6 +57,7 @@ const groups: { label: string; items: { label: string; href: string; icon: React
 
 export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
+  const session = useSession()
 
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
@@ -97,13 +101,23 @@ export function AppSidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
       <div className="border-t border-sidebar-border p-3">
         <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-          <div className="flex size-9 items-center justify-center rounded-full bg-sidebar-accent text-sm font-semibold text-sidebar-accent-foreground">
-            JR
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-sidebar-accent text-sm font-semibold text-sidebar-accent-foreground">
+            {initialsOf(session.userName)}
           </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-sidebar-foreground">Jordan Rivera</p>
-            <p className="truncate text-xs text-sidebar-foreground/50">Northstar Auto</p>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-sidebar-foreground">{session.userName}</p>
+            <p className="truncate text-xs text-sidebar-foreground/50">{session.workspaceName}</p>
           </div>
+          <form action={signOutAction}>
+            <button
+              type="submit"
+              aria-label="Sign out"
+              title="Sign out"
+              className="rounded-md p-1.5 text-sidebar-foreground/50 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+            >
+              <LogOut className="size-4" />
+            </button>
+          </form>
         </div>
       </div>
     </div>

@@ -5,9 +5,16 @@ import { usePathname } from 'next/navigation'
 import { X } from 'lucide-react'
 import { AppSidebar } from './app-sidebar'
 import { AppTopbar } from './app-topbar'
+import { SessionProvider, type AppSession } from './session-context'
 import { cn } from '@/lib/utils'
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  session,
+  children,
+}: {
+  session: AppSession
+  children: React.ReactNode
+}) {
   const [open, setOpen] = React.useState(false)
   const pathname = usePathname()
 
@@ -16,6 +23,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [pathname])
 
   return (
+    <SessionProvider session={session}>
     <div className="flex min-h-screen bg-background">
       {/* Desktop sidebar */}
       <aside className="hidden w-64 shrink-0 lg:block">
@@ -50,5 +58,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="flex-1">{children}</main>
       </div>
     </div>
+    </SessionProvider>
   )
 }
