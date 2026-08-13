@@ -1,6 +1,13 @@
 import { Badge } from '@/components/ui/badge'
 import { MessageSquare, Smartphone, ShieldCheck, ShieldOff, ShieldQuestion } from 'lucide-react'
-import type { ConvStatus, IntegrationState } from '@/data/mock'
+import type { conversationStatusEnum, connectionStateEnum } from '@/lib/db/schema/enums'
+
+type ConvStatus = (typeof conversationStatusEnum.enumValues)[number]
+/**
+ * 'available' is not a connection state in the database — it is the absence of a
+ * connection row. The catalog view adds it, so the badge still renders it.
+ */
+type IntegrationState = (typeof connectionStateEnum.enumValues)[number] | 'available'
 
 export function ChannelBadge({ channel }: { channel: 'rcs' | 'sms' }) {
   return channel === 'rcs' ? (
@@ -56,6 +63,9 @@ const intLabels: Record<IntegrationState, { label: string; variant: 'success' | 
   connected: { label: 'Healthy', variant: 'success' },
   warning: { label: 'Reauth needed', variant: 'warning' },
   error: { label: 'Failed events', variant: 'error' },
+  // A connection row that exists but is no longer authorised — distinct from
+  // 'available', which is the absence of a row entirely.
+  disconnected: { label: 'Disconnected', variant: 'error' },
   available: { label: 'Available', variant: 'neutral' },
 }
 

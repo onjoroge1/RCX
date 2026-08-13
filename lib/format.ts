@@ -44,7 +44,9 @@ export function formatDelta(rate: number | null | undefined, digits = 1): string
   return `${pct >= 0 ? '+' : ''}${pct.toFixed(digits)}%`
 }
 
-export function trendOf(rate: number | null | undefined): 'up' | 'down' | 'flat' {
+export type KpiTrend = 'up' | 'down' | 'flat'
+
+export function trendOf(rate: number | null | undefined): KpiTrend {
   if (rate == null || Math.abs(rate) < 0.0005) return 'flat'
   return rate > 0 ? 'up' : 'down'
 }

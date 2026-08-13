@@ -37,12 +37,19 @@ const SEED = 20260813
 const FIRST = ['James', 'Sophia', 'David', 'Emily', 'Michael', 'Olivia', 'Daniel', 'Ava', 'Ethan', 'Mia', 'Noah', 'Isabella', 'Liam', 'Zoe', 'Lucas', 'Grace', 'Mateo', 'Chloe', 'Aiden', 'Nora']
 const LAST = ['Carter', 'Nguyen', 'Lee', 'Davis', 'Brown', 'Wilson', 'Patel', 'Garcia', 'Martinez', 'Okafor', 'Kim', 'Rossi', 'Haddad', 'Novak', 'Silva', 'Dubois', 'Andersen', 'Yilmaz', 'Costa', 'Reyes']
 
-/** Journeys that carry live traffic, with their share of it. */
+/**
+ * Journeys that carry live traffic: [slug, share of volume, RCS propensity].
+ *
+ * RCS share is per-journey, not global. Audiences genuinely differ — a lead-gen
+ * audience skews to older handsets more than a service-reminder audience does —
+ * and a uniform figure across every row is the tell that data is fabricated.
+ * Weighted average lands near the 78.4% headline.
+ */
 const TRAFFIC = [
-  ['service-reminder', 0.38],
-  ['payment-collection', 0.26],
-  ['delivery-update', 0.24],
-  ['lead-qualification', 0.12],
+  ['service-reminder', 0.38, 0.83],
+  ['payment-collection', 0.26, 0.76],
+  ['delivery-update', 0.24, 0.8],
+  ['lead-qualification', 0.12, 0.7],
 ] as const
 
 /**
@@ -156,14 +163,17 @@ export async function seedVolume(t: Tx) {
     // gentle upward trend so the sparklines and "+14.2%" deltas have a real basis
     const trend = 1 + (DAYS - d) / DAYS * 0.18
 
-    for (const [journeySlug, share] of TRAFFIC) {
+    for (const [journeySlug, share, rcsPropensity] of TRAFFIC) {
       const journeyId = seedId('journey', journeySlug)
       const base = 536 * share * dow * trend * (0.92 + rng() * 0.16)
 
       const sent = Math.round(base)
-      const rcsSent = Math.round(sent * 0.784)
+      // Per-journey RCS share, drifting slightly day to day as handset mix changes.
+      // Without the drift, period-over-period deltas render a suspicious "+0.0%".
+      const rcsShareToday = rcsPropensity + (rng() - 0.5) * 0.05 + (DAYS - d) / DAYS * 0.02
+      const rcsSent = Math.round(sent * rcsShareToday)
       const smsSent = sent - rcsSent
-      const delivered = Math.round(sent * (0.968 + rng() * 0.008))
+      const delivered = Math.round(sent * (0.962 + rng() * 0.016))
       const read = Math.round(delivered * (0.79 + rng() * 0.04))
       const actions = Math.round(delivered * (0.255 + rng() * 0.02))
       const replies = Math.round(actions * 0.67)
@@ -182,9 +192,11 @@ export async function seedVolume(t: Tx) {
       totals.actions += actions; totals.replies += replies; totals.failed += failed
       totals.outcomes += outcomeCount; totals.value += dayValue; totals.rcsSent += rcsSent
 
+      // Split each daily total across the two channels by that day's actual RCS share.
+      const rcsDelivered = Math.round(delivered * rcsShareToday)
       await t.insert(metricMessagingDaily).values([
-        { workspaceId: WS, environment: ENV, day, journeyId, channel: 'rcs', sent: rcsSent, delivered: Math.round(delivered * 0.784), read: Math.round(read * 0.8), actions: Math.round(actions * 0.82), replies: Math.round(replies * 0.8), failed: Math.round(failed * 0.5), optedOut: int(rng, 0, 2) },
-        { workspaceId: WS, environment: ENV, day, journeyId, channel: 'sms', sent: smsSent, delivered: delivered - Math.round(delivered * 0.784), read: read - Math.round(read * 0.8), actions: actions - Math.round(actions * 0.82), replies: replies - Math.round(replies * 0.8), failed: failed - Math.round(failed * 0.5), optedOut: int(rng, 0, 1) },
+        { workspaceId: WS, environment: ENV, day, journeyId, channel: 'rcs', sent: rcsSent, delivered: rcsDelivered, read: Math.round(read * rcsShareToday), actions: Math.round(actions * (rcsShareToday + 0.04)), replies: Math.round(replies * rcsShareToday), failed: Math.round(failed * 0.5), optedOut: chance(rng, 0.25) ? 1 : 0 },
+        { workspaceId: WS, environment: ENV, day, journeyId, channel: 'sms', sent: smsSent, delivered: delivered - rcsDelivered, read: read - Math.round(read * rcsShareToday), actions: actions - Math.round(actions * (rcsShareToday + 0.04)), replies: replies - Math.round(replies * rcsShareToday), failed: failed - Math.round(failed * 0.5), optedOut: chance(rng, 0.15) ? 1 : 0 },
       ]).onConflictDoNothing()
 
       await t.insert(metricJourneyDaily).values({
@@ -192,7 +204,7 @@ export async function seedVolume(t: Tx) {
         entered, completed, failed: Math.round(entered * 0.012), waiting: Math.round(entered * 0.08),
         medianDurationSeconds: int(rng, 900, 7200),
         fallbackShare: (smsSent / sent).toFixed(4),
-        optOuts: int(rng, 0, 3), value: dayValue.toFixed(2),
+        optOuts: chance(rng, 0.3) ? 1 : 0, value: dayValue.toFixed(2),
       }).onConflictDoNothing()
 
       if (outcomeCount > 0) {
