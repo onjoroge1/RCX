@@ -1,17 +1,45 @@
 import type { Metadata } from 'next'
-import { PageHeader } from '@/components/app/page-header'
+
+import { PageContainer, PageHeader } from '@/components/app/page-header'
 import { ConversationsInbox } from '@/components/app/conversations-inbox'
+import {
+  getConversationContext,
+  getThread,
+  listConversations,
+} from '@/lib/db/queries/conversations'
 
 export const metadata: Metadata = { title: 'Conversations · RCX' }
 
-export default function ConversationsPage() {
+export default async function ConversationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ c?: string }>
+}) {
+  const { c } = await searchParams
+  const conversations = await listConversations()
+
+  // Selection rides in the URL so a thread is shareable and loads server-side.
+  // Falling back to the first row keeps the page useful with no query param.
+  const activeId = conversations.some((x) => x.id === c) ? c! : conversations[0]?.id
+
+  const [thread, context] = activeId
+    ? await Promise.all([getThread(activeId), getConversationContext(activeId)])
+    : [[], null]
+
   return (
-    <div className="flex flex-col gap-5 p-5 lg:p-6">
+    <PageContainer>
       <PageHeader
         title="Conversations"
-        description="A unified two-way inbox. Automation handles routine replies; take over any thread when a human is needed."
+        description="Every two-way customer thread, with the automation context an agent needs to take over without asking the customer to repeat themselves."
       />
-      <ConversationsInbox />
-    </div>
+      <div className="mt-6">
+        <ConversationsInbox
+          conversations={conversations}
+          thread={thread}
+          context={context}
+          now={Date.now()}
+        />
+      </div>
+    </PageContainer>
   )
 }
