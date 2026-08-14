@@ -7,6 +7,7 @@
 import bcrypt from 'bcryptjs'
 
 import { seedDb } from './client'
+import { excludedSet } from './lib/upsert'
 import {
   apiKeys,
   apiRequestLogs,
@@ -96,7 +97,7 @@ export async function seedActivity(t: Tx) {
       automationPaused: c.status === 'needs_agent',
       lastMessageAt: c.last, lastMessagePreview: c.preview, unreadCount: c.unread,
       openedAt: daysAgo(1), resolvedAt: c.status === 'resolved' ? c.last : null,
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: conversations.id, set: excludedSet(conversations, ['id']) })
   }
 
   // James Carter's full thread (§11.3)
@@ -113,7 +114,7 @@ export async function seedActivity(t: Tx) {
       deliveredAt: m.dir === 'outbound' ? sentAt : null,
       readAt: m.dir === 'outbound' ? sentAt : null,
       providerKey: 'simulated',
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: conversationMessages.id, set: excludedSet(conversationMessages, ['id']) })
   }
 
   // Short threads for the rest, so no conversation opens empty.
@@ -122,14 +123,14 @@ export async function seedActivity(t: Tx) {
     await t.insert(conversationMessages).values([
       { id: seedId('conversationMessage', `${c.slug}_0`), workspaceId: WS, environment: ENV, conversationId: cid, direction: 'outbound' as const, actor: 'system' as const, contentType: 'system', body: `Journey started — ${c.intent}`, channel: c.channel as never, sequence: 1, sentAt: new Date(c.last.getTime() - 600_000), deliveredAt: null, readAt: null },
       { id: seedId('conversationMessage', `${c.slug}_1`), workspaceId: WS, environment: ENV, conversationId: cid, direction: 'outbound' as const, actor: 'automation' as const, contentType: 'text', body: c.preview, channel: c.channel as never, sequence: 2, sentAt: c.last, deliveredAt: c.last, readAt: c.last },
-    ]).onConflictDoNothing()
+    ]).onConflictDoUpdate({ target: conversationMessages.id, set: excludedSet(conversationMessages, ['id']) })
   }
 
   await t.insert(conversationEvents).values([
     { id: seedId('conversationEvent', 'james_escalated'), conversationId: jamesId, kind: 'escalated', payload: { reason: 'Free-text question outside the journey' }, occurredAt: minutesAgo(2) },
     { id: seedId('conversationEvent', 'olivia_optout'), conversationId: seedId('conversation', 'olivia'), kind: 'opted_out', payload: { keyword: 'STOP' }, occurredAt: daysAgo(5) },
     { id: seedId('conversationEvent', 'sophia_paid'), conversationId: seedId('conversation', 'sophia'), kind: 'payment_completed', payload: { amount: '340.00', currency: 'USD' }, occurredAt: minutesAgo(22) },
-  ]).onConflictDoNothing()
+  ]).onConflictDoUpdate({ target: conversationEvents.id, set: excludedSet(conversationEvents, ['id']) })
 
   /* ---------- api keys ---------- */
   for (const k of API_KEYS) {
@@ -142,7 +143,7 @@ export async function seedActivity(t: Tx) {
       status: k.status as never, createdBy: OWNER, createdAt: k.created,
       lastUsedAt: k.lastUsed, revokedAt: 'revoked' in k ? k.revoked : null,
       revokedBy: 'revoked' in k ? OWNER : null,
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: apiKeys.id, set: excludedSet(apiKeys, ['id']) })
   }
 
   /* ---------- webhooks ---------- */
@@ -151,7 +152,7 @@ export async function seedActivity(t: Tx) {
   await t.insert(webhookEndpoints).values([
     { id: WH_MAIN, workspaceId: WS, environment: ENV, url: 'https://api.northstar.example/rcx', description: 'Primary event sink', status: 'active', createdBy: OWNER, createdAt: daysAgo(60), lastDeliveryAt: minutesAgo(1), consecutiveFailures: 0 },
     { id: WH_DELIVERY, workspaceId: WS, environment: ENV, url: 'https://hooks.northstar.example/delivery', description: 'Delivery status only', status: 'failing', createdBy: OWNER, createdAt: daysAgo(48), lastDeliveryAt: minutesAgo(5), consecutiveFailures: 18 },
-  ]).onConflictDoNothing()
+  ]).onConflictDoUpdate({ target: webhookEndpoints.id, set: excludedSet(webhookEndpoints, ['id']) })
 
   await t.insert(webhookEndpointEvents).values([
     { endpointId: WH_MAIN, eventPattern: 'message.*' },
@@ -169,7 +170,7 @@ export async function seedActivity(t: Tx) {
       id: evtId, workspaceId: WS, environment: ENV, key: 'delivery.failed',
       resourceType: 'conversation_message', resourceId: seedId('conversationMessage', 'david_1'),
       payload: { attempt: i + 1 }, occurredAt: minutesAgo(6 + i * 7),
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: platformEvents.id, set: excludedSet(platformEvents, ['id']) })
 
     await t.insert(webhookDeliveries).values({
       id: seedId('webhookDelivery', `failed_${i}`), workspaceId: WS, environment: ENV,
@@ -177,7 +178,7 @@ export async function seedActivity(t: Tx) {
       attempt: 1, status: 'failed', responseStatus: 502, durationMs: 2004,
       error: 'Bad gateway — endpoint returned 5xx',
       requestBody: { event: 'delivery.failed' }, scheduledFor: minutesAgo(6 + i * 7),
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: webhookDeliveries.id, set: excludedSet(webhookDeliveries, ['id']) })
   }
 
   /* ---------- api request logs (§19.4) ---------- */
@@ -197,7 +198,7 @@ export async function seedActivity(t: Tx) {
       conversationId: i === 3 ? jamesId : null,
       redacted: true,
       occurredAt: minutesAgo(l.secs / 60),
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: apiRequestLogs.id, set: excludedSet(apiRequestLogs, ['id']) })
   }
 
   /* ---------- campaigns (§14) ---------- */
@@ -221,7 +222,7 @@ export async function seedActivity(t: Tx) {
       createdBy: OWNER, createdAt: daysAgo(14),
       approvedBy: c.status === 'draft' ? null : OWNER,
       approvedAt: c.status === 'draft' ? null : daysAgo(10),
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: campaigns.id, set: excludedSet(campaigns, ['id']) })
 
     // §14.2 Step 1's audience numbers, as integers rather than 'Service due · 4,820'
     const rcsShare = 0.784
@@ -235,7 +236,7 @@ export async function seedActivity(t: Tx) {
       smsEstimatedCount: Math.round(c.size * 0.962 * (1 - rcsShare)),
       suppressedCount: Math.round(c.size * 0.038),
       computedAt: daysAgo(10),
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: campaignAudiences.id, set: excludedSet(campaignAudiences, ['id']) })
   }
 
   // A handful of real recipient rows for the completed campaign.
@@ -245,7 +246,7 @@ export async function seedActivity(t: Tx) {
       id: seedId('campaignRecipient', `winter_${c}`), campaignId: winter, contactId: ct(c),
       status: 'acted', channelUsed: c === 'david_lee' ? 'sms' : 'rcs',
       sentAt: daysAgo(9), deliveredAt: daysAgo(9), readAt: daysAgo(9), actedAt: daysAgo(9),
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: campaignRecipients.id, set: excludedSet(campaignRecipients, ['id']) })
   }
 
   /* ---------- audit log (§21.6) ---------- */
@@ -258,7 +259,7 @@ export async function seedActivity(t: Tx) {
       resourceLabel: a.label,
       result: 'success', locationLabel: a.loc, userAgent: 'Mozilla/5.0',
       occurredAt: a.at,
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: auditLog.id, set: excludedSet(auditLog, ['id']) })
   }
 
   return {

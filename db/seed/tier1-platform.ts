@@ -5,6 +5,7 @@
  * §18.1 in-app catalog both read it, so the two lists cannot drift.
  */
 import { seedDb } from './client'
+import { excludedSet } from './lib/upsert'
 import {
   demoFlowNodes,
   demoFlowSteps,
@@ -14,7 +15,7 @@ import {
   templates,
 } from '@/lib/db/schema'
 import { customerFlows } from '@/data/flows'
-import { newId } from '@/lib/ids'
+import { newId, seedId } from '@/lib/ids'
 
 type Tx = Parameters<Parameters<typeof seedDb.transaction>[0]>[0]
 
@@ -148,7 +149,7 @@ export async function seedPlatform(t: Tx) {
         isPlatform: true,
         status: 'approved',
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({ target: templates.id, set: excludedSet(templates, ['id']) })
   }
 
   // §22 flows. data/flows.ts stays the authoring source — breaking those during a
@@ -162,7 +163,7 @@ export async function seedPlatform(t: Tx) {
         summary: flow.summary, brandLabel: flow.brand, outcome: flow.outcome,
         smsFallback: flow.smsFallback, sortOrder: fi, published: true,
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({ target: demoFlows.id, set: excludedSet(demoFlows, ['id']) })
 
     for (const [si, step] of flow.steps.entries()) {
       const stepId = `fstep_${flow.id}_${step.id}`
@@ -173,20 +174,28 @@ export async function seedPlatform(t: Tx) {
           label: step.label, systemNote: step.systemNote,
           customerChoice: step.customerChoice ?? null,
         })
-        .onConflictDoNothing()
+        .onConflictDoUpdate({
+          target: [demoFlowSteps.flowId, demoFlowSteps.ordinal],
+          set: excludedSet(demoFlowSteps, ['flowId', 'ordinal']),
+        })
 
       for (const [ni, node] of step.nodes.entries()) {
         const { kind, ...payload } = node as { kind: string } & Record<string, unknown>
         await t
           .insert(demoFlowNodes)
           .values({
-            id: newId('demoFlowNode'),
+            // Stable, not newId(): a random id makes ON CONFLICT (id) never match,
+            // and the insert then violates the (step_id, ordinal) unique index.
+            id: seedId('demoFlowNode', `${flow.id}_${step.id}_${ni}`),
             stepId,
             ordinal: ni,
             kind: FLOW_NODE_KIND[kind] as never,
             payload,
           })
-          .onConflictDoNothing()
+          .onConflictDoUpdate({
+            target: [demoFlowNodes.stepId, demoFlowNodes.ordinal],
+            set: excludedSet(demoFlowNodes, ['stepId', 'ordinal']),
+          })
       }
     }
   }

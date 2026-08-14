@@ -12,6 +12,7 @@ import { eq } from 'drizzle-orm'
 
 import { pool, seedDb } from './client'
 import { workspaces } from '@/lib/db/schema'
+import { loadColumnNames } from './lib/upsert'
 import { seedPlatform } from './tier1-platform'
 import { seedWorkspaceCore, WS } from './tier1-workspace'
 import { seedActivity } from './tier1-activity'
@@ -22,6 +23,9 @@ async function main() {
   if (process.env.NODE_ENV === 'production') {
     throw new Error('Refusing to seed with NODE_ENV=production.')
   }
+
+  // Real column names, so excludedSet() can verify what it generates.
+  await loadColumnNames()
 
   const [ws] = await seedDb.select().from(workspaces).where(eq(workspaces.id, WS)).limit(1)
   if (!ws) {

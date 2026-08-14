@@ -12,7 +12,8 @@
     "db:studio": "drizzle-kit studio",
     "db:push": "drizzle-kit push",
     "db:seed:auth": "tsx db/seed/auth.ts",
-    "db:seed": "tsx db/seed/index.ts"
+    "db:seed": "tsx db/seed/index.ts",
+    "db:verify-convergence": "tsx db/seed/verify-convergence.ts"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.3",

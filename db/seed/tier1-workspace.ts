@@ -6,6 +6,7 @@
  * trailing comment wherever the conversion is not obvious.
  */
 import { seedDb } from './client'
+import { excludedSet } from './lib/upsert'
 import {
   brandAgentCountries,
   brandAgents,
@@ -244,7 +245,7 @@ export async function seedWorkspaceCore(t: Tx) {
       quietHoursTimezone: 'America/New_York',
       preferenceCenterUrl: 'https://northstarauto.example/messaging-preferences',
     })
-    .onConflictDoNothing()
+    .onConflictDoUpdate({ target: consentSettings.workspaceId, set: excludedSet(consentSettings, ['workspaceId']) })
 
   /* ---------- brand agents ---------- */
   await t.insert(brandAgents).values([
@@ -272,13 +273,13 @@ export async function seedWorkspaceCore(t: Tx) {
       fallbackActive: true, productionTrafficEnabled: false,
       submittedAt: daysAgo(9),
     },
-  ]).onConflictDoNothing()
+  ]).onConflictDoUpdate({ target: brandAgents.id, set: excludedSet(brandAgents, ['id']) })
 
   await t.insert(brandAgentCountries).values([
     { brandAgentId: AGENT_CARE, country: 'US', carrierReviewState: 'approved' },
     { brandAgentId: AGENT_CARE, country: 'CA', carrierReviewState: 'approved' },  // 'US, CA'
     { brandAgentId: AGENT_SALES, country: 'US', carrierReviewState: 'pending' },
-  ]).onConflictDoNothing()
+  ]).onConflictDoUpdate({ target: [brandAgentCountries.brandAgentId, brandAgentCountries.country], set: excludedSet(brandAgentCountries, ['brandAgentId', 'country']) })
 
   for (const [i, item] of CHECKLIST.entries()) {
     // Care is fully live; Sales is still waiting on carrier review and test devices.
@@ -287,14 +288,14 @@ export async function seedWorkspaceCore(t: Tx) {
     await t.insert(brandChecklistItems).values([
       { id: seedId('checklistItem', `care_${item.key}`), brandAgentId: AGENT_CARE, key: item.key, label: item.label, status: careStatus, sortOrder: i, completedAt: daysAgo(30 - i) },
       { id: seedId('checklistItem', `sales_${item.key}`), brandAgentId: AGENT_SALES, key: item.key, label: item.label, status: salesStatus as never, sortOrder: i, completedAt: salesStatus === 'complete' ? daysAgo(12 - i) : null },
-    ]).onConflictDoNothing()
+    ]).onConflictDoUpdate({ target: brandChecklistItems.id, set: excludedSet(brandChecklistItems, ['id']) })
   }
 
   await t.insert(brandTestDevices).values([
     { id: seedId('testDevice', 'pixel8'), brandAgentId: AGENT_CARE, phoneE164: '+14045550188', label: 'Pixel 8 — service desk', capability: 'rcs', addedByUserId: OWNER, lastTestedAt: daysAgo(2) },
     { id: seedId('testDevice', 'galaxy_s24'), brandAgentId: AGENT_CARE, phoneE164: '+14045550189', label: 'Galaxy S24 — workshop', capability: 'rcs', addedByUserId: OWNER, lastTestedAt: daysAgo(6) },
     { id: seedId('testDevice', 'iphone15'), brandAgentId: AGENT_CARE, phoneE164: '+14045550190', label: 'iPhone 15 — SMS fallback check', capability: 'sms', addedByUserId: OWNER, lastTestedAt: daysAgo(6) },
-  ]).onConflictDoNothing()
+  ]).onConflictDoUpdate({ target: brandTestDevices.id, set: excludedSet(brandTestDevices, ['id']) })
 
   /* ---------- segments ---------- */
   await t.insert(segments).values(
@@ -303,7 +304,7 @@ export async function seedWorkspaceCore(t: Tx) {
       kind: s.kind as never, computedSize: s.size, computedAt: hoursAgo(1),
       definition: { rules: [{ field: 'segment', op: 'eq', value: s.slug }] },
     })),
-  ).onConflictDoNothing()
+  ).onConflictDoUpdate({ target: segments.id, set: excludedSet(segments, ['id']) })
 
   /* ---------- contacts + consent + records ---------- */
   for (const c of CONTACTS) {
@@ -318,7 +319,7 @@ export async function seedWorkspaceCore(t: Tx) {
       lastInteractionAt: c.lastInteraction,
       sourceSystem: c.source,
       attributes: c.vehicle ? { vehicle: c.vehicle } : {},
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: contacts.id, set: excludedSet(contacts, ['id']) })
 
     await t.insert(consentEvents).values({
       id: seedId('consentEvent', `${c.slug}_initial`),
@@ -326,7 +327,7 @@ export async function seedWorkspaceCore(t: Tx) {
       state: c.consent as never,
       source: c.source === 'csv_import' ? 'import' : c.source === 'webhook' ? 'web_form' : 'integration',
       occurredAt: daysAgo(60),
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: consentEvents.id, set: excludedSet(consentEvents, ['id']) })
 
     if (c.consent === 'opted_out') {
       await t.insert(consentEvents).values({
@@ -334,13 +335,13 @@ export async function seedWorkspaceCore(t: Tx) {
         workspaceId: WS, environment: ENV, contactId: id,
         state: 'opted_out', source: 'keyword_reply', keyword: 'STOP', channel: 'sms',
         occurredAt: daysAgo(3),
-      }).onConflictDoNothing()
+      }).onConflictDoUpdate({ target: consentEvents.id, set: excludedSet(consentEvents, ['id']) })
 
       await t.insert(suppressions).values({
         id: seedId('suppression', c.slug), workspaceId: WS, environment: ENV,
         phoneE164: c.phone, reason: 'Customer replied STOP', source: 'keyword_reply',
         createdAt: daysAgo(3),
-      }).onConflictDoNothing()
+      }).onConflictDoUpdate({ target: suppressions.id, set: excludedSet(suppressions, ['id']) })
     }
 
     await t.insert(segmentMembers).values({
@@ -356,7 +357,7 @@ export async function seedWorkspaceCore(t: Tx) {
         externalId: `VEH-${c.last.toUpperCase()}-${c.vehicle.slice(0, 4)}`,
         sourceConnectionId: null, occurredAt: daysAgo(400),
         payload: { make: c.vehicle.split(' ')[1], model: c.vehicle.split(' ').slice(2).join(' '), year: Number(c.vehicle.split(' ')[0]) },
-      }).onConflictDoNothing()
+      }).onConflictDoUpdate({ target: contactRecords.id, set: excludedSet(contactRecords, ['id']) })
     }
   }
 
@@ -366,7 +367,7 @@ export async function seedWorkspaceCore(t: Tx) {
     { id: seedId('contactRecord', 'wo_2214'), workspaceId: WS, environment: ENV, contactId: seedId('contact', 'james_carter'), recordType: 'work_order', externalId: 'WO-2214', title: 'Work order WO-2214', summary: 'Brake pads and air filter approved', status: 'in_progress', amount: '325.00', currency: 'USD', occurredAt: hoursAgo(26) },
     { id: seedId('contactRecord', 'na_7734'), workspaceId: WS, environment: ENV, contactId: seedId('contact', 'david_lee'), recordType: 'order', externalId: 'NA-7734', title: 'Order NA-7734', summary: 'Replacement wing mirror', status: 'delivery_attempted', amount: '212.40', currency: 'USD', occurredAt: daysAgo(2) },
     { id: seedId('contactRecord', 'a_4821'), workspaceId: WS, environment: ENV, contactId: seedId('contact', 'james_carter'), recordType: 'booking', externalId: 'A-4821', title: 'Service appointment', summary: 'Tomorrow 10:00 AM · Northstar Midtown', status: 'confirmed', occurredAt: hoursAgo(3) },
-  ]).onConflictDoNothing()
+  ]).onConflictDoUpdate({ target: contactRecords.id, set: excludedSet(contactRecords, ['id']) })
 
   /* ---------- variable catalog (§12.3) ---------- */
   await t.insert(variableDefinitions).values([
@@ -376,7 +377,7 @@ export async function seedWorkspaceCore(t: Tx) {
     { id: seedId('variableDefinition', 'balance_due'), workspaceId: WS, key: 'balance_due', label: 'Balance due', type: 'currency', source: 'record_field', sourcePath: 'contact_records[type=invoice].amount', sampleValue: '482.60' },
     { id: seedId('variableDefinition', 'invoice_id'), workspaceId: WS, key: 'invoice_id', label: 'Invoice ID', type: 'text', source: 'record_field', sourcePath: 'contact_records[type=invoice].externalId', sampleValue: 'INV-4821' },
     { id: seedId('variableDefinition', 'order_id'), workspaceId: WS, key: 'order_id', label: 'Order ID', type: 'text', source: 'record_field', sourcePath: 'contact_records[type=order].externalId', sampleValue: 'NA-7734' },
-  ]).onConflictDoNothing()
+  ]).onConflictDoUpdate({ target: variableDefinitions.id, set: excludedSet(variableDefinitions, ['id']) })
 
   /* ---------- goals ---------- */
   await t.insert(goals).values(
@@ -384,7 +385,7 @@ export async function seedWorkspaceCore(t: Tx) {
       id: seedId('goal', g.slug), workspaceId: WS, key: g.slug,
       name: g.name, kind: g.kind as never, defaultValue: g.value, valueSource: 'record_amount',
     })),
-  ).onConflictDoNothing()
+  ).onConflictDoUpdate({ target: goals.id, set: excludedSet(goals, ['id']) })
 
   /* ---------- messages + versions + actions + variables ---------- */
   for (const m of MESSAGES) {
@@ -424,7 +425,7 @@ export async function seedWorkspaceCore(t: Tx) {
       smsFallback: m.sms, channels: m.channels as never,
       createdBy: OWNER, createdAt: daysAgo(45),
       publishedAt: m.status === 'live' ? daysAgo(40) : null,
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: messageVersions.id, set: excludedSet(messageVersions, ['id']) })
 
     if (m.actions.length > 0) {
       await t.insert(messageActions).values(
@@ -434,7 +435,7 @@ export async function seedWorkspaceCore(t: Tx) {
           postbackKey: 'postbackKey' in a ? a.postbackKey : null,
           url: 'url' in a ? a.url : null,
         })),
-      ).onConflictDoNothing()
+      ).onConflictDoUpdate({ target: messageActions.id, set: excludedSet(messageActions, ['id']) })
     }
 
     if (m.variables.length > 0) {
@@ -443,7 +444,7 @@ export async function seedWorkspaceCore(t: Tx) {
           id: seedId('messageVariable', `${m.slug}_${v.key}`), messageVersionId: verId,
           key: v.key, type: v.type as never, required: true, sampleValue: v.sample,
         })),
-      ).onConflictDoNothing()
+      ).onConflictDoUpdate({ target: messageVariables.id, set: excludedSet(messageVariables, ['id']) })
     }
   }
 
@@ -451,7 +452,7 @@ export async function seedWorkspaceCore(t: Tx) {
     { id: seedId('savedReply', 'wait_onsite'), workspaceId: WS, name: 'Waiting area', body: 'Yes — we have a waiting area with wifi and coffee. Most inspections take about 90 minutes.', category: 'Service' },
     { id: seedId('savedReply', 'loaner'), workspaceId: WS, name: 'Loaner vehicle', body: 'We can arrange a loaner if the work runs past the day. Would you like me to reserve one?', category: 'Service' },
     { id: seedId('savedReply', 'payment_plan'), workspaceId: WS, name: 'Payment plan', body: 'We can split this across two payments. Shall I set that up?', category: 'Payments' },
-  ]).onConflictDoNothing()
+  ]).onConflictDoUpdate({ target: savedReplies.id, set: excludedSet(savedReplies, ['id']) })
 
   /* ---------- journeys ---------- */
   for (const j of JOURNEYS) {
@@ -462,17 +463,17 @@ export async function seedWorkspaceCore(t: Tx) {
       id: jid, workspaceId: WS, name: j.name, status: j.status as never,
       triggerSummary: j.trigger, currentVersionId: vid, createdBy: OWNER,
       createdAt: daysAgo(50), updatedAt: j.updated,
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: journeys.id, set: excludedSet(journeys, ['id']) })
 
     await t.insert(journeyVersions).values({
       id: vid, journeyId: jid, version: 1, createdBy: OWNER, createdAt: daysAgo(50),
       publishedAt: j.status === 'published' ? j.updated : null,
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: journeyVersions.id, set: excludedSet(journeyVersions, ['id']) })
 
     if (j.status === 'published') {
       await t.insert(journeyPublications).values({
         journeyId: jid, environment: ENV, versionId: vid, publishedAt: j.updated, publishedBy: OWNER,
-      }).onConflictDoNothing()
+      }).onConflictDoUpdate({ target: [journeyPublications.journeyId, journeyPublications.environment], set: excludedSet(journeyPublications, ['journeyId', 'environment']) })
     }
   }
 
@@ -487,7 +488,7 @@ export async function seedWorkspaceCore(t: Tx) {
       messageId: 'message' in n ? seedId('message', n.message) : null,
       goalId: 'goal' in n ? seedId('goal', n.goal) : null,
       config: {},
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: journeyNodes.id, set: excludedSet(journeyNodes, ['id']) })
   }
 
   for (const [i, e] of SERVICE_REMINDER_EDGES.entries()) {
@@ -496,7 +497,7 @@ export async function seedWorkspaceCore(t: Tx) {
       fromNodeId: seedId('journeyNode', `sr_${e.from}`),
       toNodeId: seedId('journeyNode', `sr_${e.to}`),
       kind: e.kind as never, label: 'label' in e ? e.label : null, ordinal: i,
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: journeyEdges.id, set: excludedSet(journeyEdges, ['id']) })
   }
 
   /* ---------- integration connections (§18) ---------- */
@@ -517,13 +518,13 @@ export async function seedWorkspaceCore(t: Tx) {
       failureCount: c.failures, avgLatencyMs: c.latency,
       healthMessage: 'health' in c ? c.health : null,
       expiresAt: 'expires' in c ? c.expires : null,
-    }).onConflictDoNothing()
+    }).onConflictDoUpdate({ target: integrationConnections.id, set: excludedSet(integrationConnections, ['id']) })
 
     await t.insert(integrationEventSubscriptions).values(
       ['contact.updated', 'appointment.due', 'invoice.created'].map((eventKey) => ({
         connectionId: cid, eventKey, enabled: true,
       })),
-    ).onConflictDoNothing()
+    ).onConflictDoUpdate({ target: [integrationEventSubscriptions.connectionId, integrationEventSubscriptions.eventKey], set: excludedSet(integrationEventSubscriptions, ['connectionId', 'eventKey']) })
   }
 
   return {

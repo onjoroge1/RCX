@@ -9,6 +9,7 @@ import bcrypt from 'bcryptjs'
 import { eq } from 'drizzle-orm'
 
 import { seedDb, pool } from './client'
+import { excludedSet, loadColumnNames } from './lib/upsert'
 import { organizations, permissions, rolePermissions, roles, users, workspaceMembers, workspaces } from '@/lib/db/schema'
 import { PERMISSIONS } from '@/lib/auth/permission-keys'
 
@@ -98,6 +99,7 @@ const TEAM = [
 ] as const
 
 async function main() {
+  await loadColumnNames()
   const db = seedDb
 
   const email = (process.env.DEMO_USER_EMAIL ?? 'demo@rcx.example').toLowerCase()
@@ -132,7 +134,7 @@ async function main() {
           isSystem: true,
           sortOrder: i,
         })
-        .onConflictDoNothing()
+        .onConflictDoUpdate({ target: roles.id, set: excludedSet(roles, ['id']) })
 
       await t.delete(rolePermissions).where(eq(rolePermissions.roleId, id))
       if (r.grants.length > 0) {
@@ -147,7 +149,7 @@ async function main() {
     await t
       .insert(organizations)
       .values({ id: DEMO.orgId, name: 'Northstar Auto', slug: 'northstar-auto', country: 'US' })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({ target: organizations.id, set: excludedSet(organizations, ['id']) })
 
     await t
       .insert(workspaces)
@@ -159,7 +161,7 @@ async function main() {
         timezone: 'America/New_York',
         isDemo: true,
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({ target: workspaces.id, set: excludedSet(workspaces, ['id']) })
 
     await t
       .insert(users)
@@ -187,7 +189,7 @@ async function main() {
         status: 'active',
         defaultEnvironment: 'test',
       })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({ target: workspaceMembers.id, set: excludedSet(workspaceMembers, ['id']) })
 
     // The rest of the team. No password hash — they cannot sign in, which is the
     // truthful state for seeded colleagues.
