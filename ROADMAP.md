@@ -67,10 +67,15 @@ G  /admin, leads, pricing ....... ⬜
 ## 5. Known risks — read before shipping
 
 ```
-🔴 SEED NON-CONVERGENT ....... 60 onConflictDoNothing vs 7 DoUpdate. Re-running does not
-                               apply changed field definitions to existing rows. Counts-based
-                               idempotency tests structurally cannot catch this.
-🔴 PROD BUILD UNVERIFIED ..... `next build` had never been run until 2026-08-14. Dev ≠ prod.
+✅ SEED CONVERGENT ........... FIXED 8368fea. 46 sites upsert from EXCLUDED; the 14 that
+                               remain DoNothing are already convergent or pure link tables.
+                               Proven by `pnpm db:verify-convergence --check`, which corrupts
+                               seeded values and asserts re-seeding restores them.
+✅ PROD BUILD PASSES ......... FIXED 2026-08-14. next/dist/compiled/commander/index.js was
+                               CORRUPTED (37KB, exported nothing) — `next build` had been
+                               broken for the whole project's life and only dev was ever run.
+                               Repaired with `pnpm install --force`; 28 routes now build.
+                               LESSON: run `pnpm build` every session, not just `next dev`.
 🔴 TENANT ISOLATION UNTESTED . One workspace exists. scoped() is uniformly applied by
                                convention but has never been proven against a second tenant.
 🔴 ZERO TESTS ................ no unit, integration, or e2e. Verification is manual curl + browser.
@@ -95,7 +100,12 @@ G  /admin, leads, pricing ....... ⬜
 ```bash
 git grep -l '@/data/mock' -- app components   # Phase D meter
 npx tsc --noEmit                              # types
-npx next build                                # prod build — RUN THIS, it was never run
-pnpm db:seed                                  # idempotent-ish; see risk above
+pnpm build                                    # prod build — run EVERY session, dev != prod
+pnpm db:seed                                  # convergent as of 8368fea
+pnpm db:verify-convergence                    # corrupt seeded values...
+pnpm db:seed && pnpm db:verify-convergence --check   # ...then assert they were restored
 curl -sI localhost:3000/app/overview          # expect 307 when signed out
 ```
+
+Do NOT use `npx next build` — npx resolves a different binary and fails with a
+misleading commander error. Use the package script.
