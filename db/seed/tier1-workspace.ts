@@ -125,7 +125,7 @@ const SEGMENTS = [
 
 const MESSAGES = [
   {
-    slug: 'service_reminder_rich_card', name: 'Service reminder — rich card', status: 'live',
+    slug: 'service_reminder_rich_card', template: 'appointment-reminder', name: 'Service reminder — rich card', status: 'live',
     category: 'Booking', channels: ['rcs', 'sms'], updated: hoursAgo(2),
     heading: 'Time for your next service',
     description: 'Hi {{first_name}} — your {{vehicle}} is due for its scheduled inspection.',
@@ -141,7 +141,7 @@ const MESSAGES = [
     ],
   },
   {
-    slug: 'payment_request_invoice', name: 'Payment request — invoice', status: 'live',
+    slug: 'payment_request_invoice', template: 'payment-reminder', name: 'Payment request — invoice', status: 'live',
     category: 'Payments', channels: ['rcs', 'sms'], updated: daysAgo(1),
     heading: 'Your invoice is ready',
     description: 'Invoice {{invoice_id}} for {{balance_due}} is ready to pay.',
@@ -156,7 +156,7 @@ const MESSAGES = [
     ],
   },
   {
-    slug: 'delivery_status_carousel', name: 'Delivery status carousel', status: 'approved',
+    slug: 'delivery_status_carousel', template: 'order-shipped', name: 'Delivery status carousel', status: 'approved',
     category: 'Delivery', channels: ['rcs'], updated: daysAgo(3),
     heading: 'Your order is on the way', description: 'Track {{order_id}} and manage delivery.',
     sms: null,
@@ -164,7 +164,7 @@ const MESSAGES = [
     variables: [{ key: 'order_id', type: 'text', sample: 'NA-7734' }],
   },
   {
-    slug: 'quote_approval', name: 'Quote approval', status: 'testing',
+    slug: 'quote_approval', template: 'quote-approval', name: 'Quote approval', status: 'testing',
     category: 'Commerce', channels: ['rcs'], updated: daysAgo(5),
     heading: 'Recommended repairs', description: 'Review and approve the work you want.',
     sms: null,
@@ -175,7 +175,7 @@ const MESSAGES = [
     variables: [],
   },
   {
-    slug: 'welcome_message', name: 'Welcome message', status: 'draft',
+    slug: 'welcome_message', template: 'customer-welcome', name: 'Welcome message', status: 'draft',
     category: 'Support', channels: ['rcs', 'sms'], updated: daysAgo(7),
     heading: 'Welcome to Northstar Auto', description: 'We will keep you posted about your vehicle.',
     sms: 'Welcome to Northstar Auto. Reply HELP any time, STOP to opt out.',
@@ -391,11 +391,28 @@ export async function seedWorkspaceCore(t: Tx) {
     const msgId = seedId('message', m.slug)
     const verId = seedId('messageVersion', `${m.slug}_v1`)
 
-    await t.insert(messages).values({
-      id: msgId, workspaceId: WS, name: m.name, status: m.status as never,
-      category: m.category, currentVersionId: verId, createdBy: OWNER,
-      createdAt: daysAgo(45), updatedAt: m.updated,
-    }).onConflictDoNothing()
+    await t
+      .insert(messages)
+      .values({
+        id: msgId, workspaceId: WS, name: m.name, status: m.status as never,
+        category: m.category, currentVersionId: verId, createdBy: OWNER,
+        // Lets templates.usage be derived from a real relationship instead of stored.
+        createdFromTemplateId: `tpl_${m.template}`,
+        createdAt: daysAgo(45), updatedAt: m.updated,
+      })
+      // Upsert, not DoNothing: onConflictDoNothing makes re-running non-duplicating
+      // but NOT convergent — a field added to the seed definition would silently
+      // never reach rows that already exist.
+      .onConflictDoUpdate({
+        target: messages.id,
+        set: {
+          name: m.name,
+          status: m.status as never,
+          category: m.category,
+          createdFromTemplateId: `tpl_${m.template}`,
+          updatedAt: m.updated,
+        },
+      })
 
     await t.insert(messageVersions).values({
       id: verId, messageId: msgId, version: 1,
