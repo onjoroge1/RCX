@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { cn } from '@/lib/utils'
@@ -15,6 +15,7 @@ import type {
   ConversationSummaryDto,
   ThreadMessageDto,
 } from '@/lib/db/queries/conversations'
+import { resumeAutomation, sendReply, takeOverConversation } from '@/lib/actions/conversations'
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -45,8 +46,7 @@ export function ConversationsInbox({
   const [filter, setFilter] = useState<string>('all')
   const [query, setQuery] = useState('')
   const [draft, setDraft] = useState('')
-  /** Optimistic only — Phase E replaces this with a server action. */
-  const [pendingReplies, setPendingReplies] = useState<ThreadMessageDto[]>([])
+  const [isPending, startTransition] = useTransition()
 
   const activeId = context?.conversationId ?? conversations[0]?.id
 
@@ -67,27 +67,29 @@ export function ConversationsInbox({
   }
 
   const isAgentActive = context?.status === 'agent_active'
-  const messages = [...thread, ...pendingReplies]
+  const messages = thread
 
-  function sendReply() {
+  /** Server actions return {ok}; surface the real error rather than assuming success. */
+  function run(fn: () => Promise<{ ok: boolean; error?: string }>, success: [string, string]) {
+    startTransition(async () => {
+      const res = await fn()
+      if (res.ok) {
+        router.refresh()
+        toast(success[0], success[1])
+      } else {
+        toast('Could not complete that', res.error ?? 'Unknown error', 'error')
+      }
+    })
+  }
+
+  function submitReply() {
     const text = draft.trim()
     if (!text || !activeId) return
-    setPendingReplies((prev) => [
-      ...prev,
-      {
-        id: `pending-${prev.length}`,
-        actor: 'agent',
-        direction: 'outbound',
-        contentType: 'text',
-        body: text,
-        content: null,
-        sentAt: new Date(),
-        isInternalNote: false,
-        actorName: 'You',
-      },
-    ])
     setDraft('')
-    toast('Reply sent', 'Not yet persisted — server actions land in the next phase.', 'info')
+    run(() => sendReply({ conversationId: activeId, body: text }), [
+      'Reply sent',
+      'Delivered to the customer thread.',
+    ])
   }
 
   if (conversations.length === 0) {
@@ -189,12 +191,18 @@ export function ConversationsInbox({
             <Button
               size="sm"
               variant={isAgentActive ? 'outline' : 'default'}
+              disabled={isPending || !activeId}
               onClick={() =>
-                toast(
-                  isAgentActive ? 'Automation resumed' : 'You are now handling this conversation',
-                  'Not yet persisted — server actions land in the next phase.',
-                  'info',
-                )
+                activeId &&
+                (isAgentActive
+                  ? run(() => resumeAutomation(activeId), [
+                      'Automation resumed',
+                      'The journey will continue handling replies.',
+                    ])
+                  : run(() => takeOverConversation(activeId), [
+                      'You are now handling this conversation',
+                      'Automation paused for this thread.',
+                    ]))
               }
             >
               {isAgentActive ? 'Resume automation' : 'Take over'}
@@ -215,13 +223,15 @@ export function ConversationsInbox({
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) sendReply()
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229) submitReply()
                 }}
                 placeholder="Type a reply…"
                 aria-label="Reply"
                 className="h-10 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
               />
-              <Button onClick={sendReply}>Send</Button>
+              <Button onClick={submitReply} disabled={isPending}>
+                Send
+              </Button>
             </div>
           ) : (
             <div className="flex items-center justify-between gap-3 rounded-md bg-muted px-4 py-3">
