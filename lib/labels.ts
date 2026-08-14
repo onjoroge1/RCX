@@ -79,6 +79,34 @@ export const carrierReviewLabel = labeller({
 
 export const launchStateLabel = labeller({ test: 'Test', ready: 'Ready', live: 'Live' })
 
+export const channelPreferenceLabel = labeller({
+  rcs_with_sms_fallback: 'RCS + SMS',
+  rcs_only: 'RCS only',
+  sms_only: 'SMS only',
+})
+
+export const auditResultLabel = labeller({
+  success: 'Success',
+  failure: 'Failure',
+  denied: 'Denied',
+})
+
+/** Dotted audit action keys back to prose: 'journey.published' -> 'Published journey'. */
+export const auditActionLabel = labeller({
+  'journey.published': 'Published journey',
+  'journey.paused': 'Paused journey',
+  'message.edited': 'Edited message',
+  'message.created': 'Created message',
+  'api_key.created': 'Created API key',
+  'api_key.revoked': 'Revoked API key',
+  'template.approved': 'Approved template',
+  'conversation.taken_over': 'Took over conversation',
+  'conversation.resolved': 'Resolved conversation',
+  'integration.connected': 'Connected integration',
+  'team.invited': 'Invited team member',
+  'contact.opted_out': 'Recorded opt-out',
+})
+
 export const checklistStatusLabel = labeller({
   not_started: 'Not started',
   in_progress: 'In progress',

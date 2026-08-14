@@ -83,6 +83,20 @@ const DEMO = {
   memberId: 'mem_demo',
 }
 
+/**
+ * The rest of the §21.2 team, ported from data/mock.ts. Only the demo user has a
+ * password — these exist so the team table, the roles matrix and audit
+ * attribution have real people behind them rather than one row.
+ * `active` is minutes since last seen, converted from the mock's 'Now' / '10m ago'.
+ */
+const TEAM = [
+  { slug: 'alex_rivera', name: 'Alex Rivera', email: 'alex@northstar.example', role: 'owner', activeMinsAgo: 0, status: 'active' },
+  { slug: 'priya_shah', name: 'Priya Shah', email: 'priya@northstar.example', role: 'journey_manager', activeMinsAgo: 10, status: 'active' },
+  { slug: 'marcus_chen', name: 'Marcus Chen', email: 'marcus@northstar.example', role: 'support_agent', activeMinsAgo: 60, status: 'active' },
+  { slug: 'dana_white', name: 'Dana White', email: 'dana@northstar.example', role: 'developer', activeMinsAgo: 2880, status: 'active' },
+  { slug: 'sam_ortiz', name: 'Sam Ortiz', email: 'sam@northstar.example', role: 'compliance_reviewer', activeMinsAgo: 7200, status: 'suspended' },
+] as const
+
 async function main() {
   const db = seedDb
 
@@ -174,6 +188,50 @@ async function main() {
         defaultEnvironment: 'test',
       })
       .onConflictDoNothing()
+
+    // The rest of the team. No password hash — they cannot sign in, which is the
+    // truthful state for seeded colleagues.
+    for (const member of TEAM) {
+      const userId = `usr_${member.slug}`
+      await t
+        .insert(users)
+        .values({
+          id: userId,
+          name: member.name,
+          email: member.email,
+          defaultWorkspaceId: DEMO.workspaceId,
+          status: member.status === 'suspended' ? 'suspended' : 'active',
+          lastSeenAt: new Date(Date.now() - member.activeMinsAgo * 60_000),
+        })
+        .onConflictDoUpdate({
+          target: users.email,
+          set: {
+            name: member.name,
+            status: member.status === 'suspended' ? 'suspended' : 'active',
+            lastSeenAt: new Date(Date.now() - member.activeMinsAgo * 60_000),
+          },
+        })
+
+      await t
+        .insert(workspaceMembers)
+        .values({
+          id: `mem_${member.slug}`,
+          workspaceId: DEMO.workspaceId,
+          userId,
+          roleId: `rol_${member.role}`,
+          status: member.status === 'suspended' ? 'suspended' : 'active',
+          defaultEnvironment: 'test',
+          lastActiveAt: new Date(Date.now() - member.activeMinsAgo * 60_000),
+        })
+        .onConflictDoUpdate({
+          target: workspaceMembers.id,
+          set: {
+            roleId: `rol_${member.role}`,
+            status: member.status === 'suspended' ? 'suspended' : 'active',
+            lastActiveAt: new Date(Date.now() - member.activeMinsAgo * 60_000),
+          },
+        })
+    }
   })
 
   console.log(`Seeded ${PERMISSION_CATALOG.length} permissions, ${SYSTEM_ROLES.length} roles`)

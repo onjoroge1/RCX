@@ -1,17 +1,49 @@
 import type { Metadata } from 'next'
-import { PageHeader } from '@/components/app/page-header'
-import { SettingsPanel } from '@/components/app/settings-panel'
 
-export const metadata: Metadata = { title: 'Settings' }
+import { PageContainer, PageHeader } from '@/components/app/page-header'
+import { SettingsPanel, type SettingsTab } from '@/components/app/settings-panel'
+import {
+  getRolesMatrix,
+  getWorkspaceSettings,
+  listAuditLog,
+  listTeam,
+} from '@/lib/db/queries/settings'
 
-export default function SettingsPage() {
+export const metadata: Metadata = { title: 'Settings · RCX' }
+
+const TABS: SettingsTab[] = ['Workspace', 'Team', 'Roles', 'Audit log']
+
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>
+}) {
+  const { tab } = await searchParams
+  const activeTab = TABS.includes(tab as SettingsTab) ? (tab as SettingsTab) : 'Workspace'
+
+  const [workspace, team, matrix, audit] = await Promise.all([
+    getWorkspaceSettings(),
+    listTeam(),
+    getRolesMatrix(),
+    listAuditLog(),
+  ])
+
   return (
-    <div className="space-y-6">
+    <PageContainer>
       <PageHeader
         title="Settings"
-        description="Workspace configuration, team, roles, and governance."
+        description="Workspace configuration, team access, role permissions, and the governance trail."
       />
-      <SettingsPanel />
-    </div>
+      <div className="mt-6">
+        <SettingsPanel
+          tab={activeTab}
+          workspace={workspace}
+          team={team}
+          matrix={matrix}
+          audit={audit}
+          now={Date.now()}
+        />
+      </div>
+    </PageContainer>
   )
 }
