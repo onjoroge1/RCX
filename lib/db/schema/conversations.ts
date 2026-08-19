@@ -8,6 +8,7 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
 import {
@@ -42,7 +43,6 @@ export const conversations = pgTable(
     channel: channelEnum().notNull().default('rcs'),
     status: conversationStatusEnum().notNull().default('automated'),
     intent: text(),
-    // Both of these were display strings or entirely absent in the mock.
     journeyId: text().references(() => journeys.id, { onDelete: 'set null' }),
     journeyRunId: text().references(() => journeyRuns.id, { onDelete: 'set null' }),
     assigneeUserId: text().references(() => users.id, { onDelete: 'set null' }),
@@ -57,22 +57,12 @@ export const conversations = pgTable(
     resolvedBy: text().references(() => users.id, { onDelete: 'set null' }),
   },
   (t) => [
-    // The §11.1 queue query.
     index('conversations_queue_idx').on(t.workspaceId, t.environment, t.status, t.lastMessageAt.desc()),
     index('conversations_assignee_idx').on(t.assigneeUserId, t.status),
     index('conversations_contact_idx').on(t.contactId),
   ],
 )
 
-/**
- * `content` follows the FlowNode union already defined in data/flows.ts — its 14
- * kinds (system, business, customer, richCard, carousel, payment, quote, tracker, …)
- * are the best available specification for what an RCS message body can be, and
- * they were written against the real previews. Lifted into Zod rather than reinvented.
- *
- * Internal notes live here behind `isInternalNote` rather than in a separate table,
- * so the thread has one ordering and one query.
- */
 export const conversationMessages = pgTable(
   'conversation_messages',
   {
@@ -103,10 +93,14 @@ export const conversationMessages = pgTable(
     failedAt: timestamp({ withTimezone: true }),
     failureReason: failureReasonEnum(),
   },
-  (t) => [index('conversation_messages_thread_idx').on(t.conversationId, t.sequence)],
+  (t) => [
+    // Thread order is a database invariant, not merely an application convention.
+    // App writes also serialize on the parent conversation row before allocating
+    // MAX(sequence)+1; this index is the final fail-closed guard.
+    uniqueIndex('conversation_messages_thread_unique').on(t.conversationId, t.sequence),
+  ],
 )
 
-/** §11.2's handoff audit trail, and the inline system events in the thread. */
 export const conversationEvents = pgTable(
   'conversation_events',
   {
@@ -122,12 +116,6 @@ export const conversationEvents = pgTable(
   (t) => [index('conversation_events_conversation_idx').on(t.conversationId, t.occurredAt.desc())],
 )
 
-/**
- * Append-only delivery ledger. This is what §17.3's funnel and §17.7's failure
- * chart aggregate. The simulated provider writes exactly the rows a real
- * aggregator would — that equivalence is what makes the provider seam real
- * rather than decorative.
- */
 export const messageDeliveryEvents = pgTable(
   'message_delivery_events',
   {
