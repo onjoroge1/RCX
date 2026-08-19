@@ -22,7 +22,15 @@ export const messageBuilderContentSchema = z.object({
 export type MessageBuilderContent = z.infer<typeof messageBuilderContentSchema>
 
 export function extractVariables(content: MessageBuilderContent, smsFallback: string): string[] {
-  const text = [content.heading, content.description, smsFallback].join('\n')
+  // Variables can appear anywhere customer-visible. Keeping this extractor complete
+  // is important because message_variables is also the runtime/default-value contract.
+  const text = [
+    content.heading,
+    content.description,
+    ...content.actions,
+    ...content.chips,
+    smsFallback,
+  ].join('\n')
   const variables = new Set<string>()
   for (const match of text.matchAll(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g)) {
     if (match[1]) variables.add(match[1])
