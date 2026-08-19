@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { builderContentToCanonical } from '../lib/messaging/canonical'
 import { interpolateTemplate, resolveMessageSnapshot } from '../lib/messaging/personalization'
 
 const authored = {
@@ -43,6 +44,41 @@ test('resolved snapshot freezes customer-specific message and SMS fallback', () 
     'first_name',
     'vehicle',
   ])
+  assert.deepEqual(snapshot.actionPostbackData, ['book_for_appointment_day'])
+  assert.deepEqual(snapshot.chipPostbackData, ['chip_not_now'])
+})
+
+test('personalized display labels do not change canonical postback identity', () => {
+  const thursday = resolveMessageSnapshot(authored, null, {
+    first_name: 'James',
+    vehicle: 'Camry',
+    city: 'Atlanta',
+    appointment_day: 'Thursday',
+  })
+  const friday = resolveMessageSnapshot(authored, null, {
+    first_name: 'Sophia',
+    vehicle: 'Civic',
+    city: 'Atlanta',
+    appointment_day: 'Friday',
+  })
+
+  const thursdayMessage = builderContentToCanonical(thursday.content, thursday.smsFallback, {
+    actionPostbackData: thursday.actionPostbackData,
+    chipPostbackData: thursday.chipPostbackData,
+  })
+  const fridayMessage = builderContentToCanonical(friday.content, friday.smsFallback, {
+    actionPostbackData: friday.actionPostbackData,
+    chipPostbackData: friday.chipPostbackData,
+  })
+
+  assert.equal(thursdayMessage.kind, 'rich_card')
+  assert.equal(fridayMessage.kind, 'rich_card')
+  if (thursdayMessage.kind !== 'rich_card' || fridayMessage.kind !== 'rich_card') return
+
+  assert.equal(thursdayMessage.cardSuggestions?.[0]?.label, 'Book for Thursday')
+  assert.equal(fridayMessage.cardSuggestions?.[0]?.label, 'Book for Friday')
+  assert.equal(thursdayMessage.cardSuggestions?.[0]?.postbackData, 'book_for_appointment_day')
+  assert.equal(fridayMessage.cardSuggestions?.[0]?.postbackData, 'book_for_appointment_day')
 })
 
 test('missing variables fail closed before provider queueing', () => {
