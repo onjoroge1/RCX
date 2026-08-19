@@ -3,7 +3,7 @@ import 'server-only'
 import { and, eq } from 'drizzle-orm'
 
 import type { Tx } from '@/lib/audit'
-import { journeyEdges, journeyNodes, messages } from '@/lib/db/schema'
+import { journeyEdges, journeyNodes, journeys, journeyVersions, messages, messageVersions } from '@/lib/db/schema'
 import {
   goalRuntimeConfigSchema,
   messageRuntimeConfigSchema,
@@ -19,6 +19,19 @@ export async function prepareJourneyVersionForPublication(
   tx: Tx,
   input: { workspaceId: string; versionId: string },
 ): Promise<void> {
+  const [version] = await tx
+    .select({
+      id: journeyVersions.id,
+      journeyId: journeyVersions.journeyId,
+      publishedAt: journeyVersions.publishedAt,
+    })
+    .from(journeyVersions)
+    .innerJoin(journeys, eq(journeys.id, journeyVersions.journeyId))
+    .where(and(eq(journeyVersions.id, input.versionId), eq(journeys.workspaceId, input.workspaceId)))
+    .limit(1)
+  if (!version) throw new Error('Journey version does not belong to this workspace.')
+  const alreadyFrozen = version.publishedAt != null
+
   const nodes = await tx
     .select({
       id: journeyNodes.id,
@@ -28,6 +41,7 @@ export async function prepareJourneyVersionForPublication(
       config: journeyNodes.config,
       retryPolicy: journeyNodes.retryPolicy,
       messageId: journeyNodes.messageId,
+      messageVersionId: journeyNodes.messageVersionId,
     })
     .from(journeyNodes)
     .where(eq(journeyNodes.journeyVersionId, input.versionId))
@@ -67,9 +81,29 @@ export async function prepareJourneyVersionForPublication(
     if (node.type === 'time_window') timeWindowConfigSchema.parse(node.config)
     if (node.type === 'publish_event') publishEventConfigSchema.parse(node.config)
     if (node.type === 'goal') goalRuntimeConfigSchema.parse(node.config ?? {})
+
     if (MESSAGE_TYPES.has(node.type)) {
       messageRuntimeConfigSchema.parse(node.config ?? {})
       if (!node.messageId) throw new Error(`Message node “${node.key}” has no message selected.`)
+
+      if (alreadyFrozen) {
+        if (!node.messageVersionId) {
+          throw new Error(`Frozen message node “${node.key}” has no pinned message version.`)
+        }
+        const [pinned] = await tx
+          .select({ id: messageVersions.id })
+          .from(messageVersions)
+          .where(
+            and(
+              eq(messageVersions.id, node.messageVersionId),
+              eq(messageVersions.messageId, node.messageId),
+            ),
+          )
+          .limit(1)
+        if (!pinned) throw new Error(`Frozen message node “${node.key}” has an invalid pinned message version.`)
+        continue
+      }
+
       const [message] = await tx
         .select({ currentVersionId: messages.currentVersionId, archivedAt: messages.archivedAt })
         .from(messages)
