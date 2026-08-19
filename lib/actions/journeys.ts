@@ -17,6 +17,7 @@ import {
 import { getScope, scoped } from '@/lib/db/scope'
 import { newId } from '@/lib/ids'
 import { prepareJourneyVersionForPublication } from '@/lib/journeys/validation'
+import { cloneJourneyVersion } from '@/lib/journeys/versioning'
 
 export type JourneyActionResult =
   | { ok: true; id?: string }
@@ -146,7 +147,10 @@ export async function updateJourneyNode(input: {
       const [owned] = await t
         .select({
           nodeId: journeyNodes.id,
+          nodeKey: journeyNodes.key,
+          nodeVersionId: journeyNodes.journeyVersionId,
           journeyName: journeys.name,
+          currentVersionId: journeys.currentVersionId,
           oldName: journeyNodes.name,
           oldDescription: journeyNodes.description,
           versionPublishedAt: journeyVersions.publishedAt,
@@ -165,14 +169,29 @@ export async function updateJourneyNode(input: {
         .for('update')
 
       if (!owned) throw new Error('Journey node not found.')
+      if (owned.currentVersionId !== owned.nodeVersionId) {
+        throw new Error('This journey changed since you opened it. Reload before editing.')
+      }
+
+      let targetNodeId = owned.nodeId
+      let createdDraftVersion: number | null = null
       if (owned.versionPublishedAt) {
-        throw new Error('Published journey versions are immutable. Create a new draft version before editing.')
+        const draft = await cloneJourneyVersion(t, {
+          journeyId: parsed.journeyId,
+          sourceVersionId: owned.nodeVersionId,
+          createdBy: scope.userId,
+          notes: 'Draft created automatically on edit',
+        })
+        const clonedNodeId = draft.nodeIdByKey.get(owned.nodeKey)
+        if (!clonedNodeId) throw new Error('Cloned journey version is missing the edited node.')
+        targetNodeId = clonedNodeId
+        createdDraftVersion = draft.version
       }
 
       await t
         .update(journeyNodes)
         .set({ name: parsed.label, description: parsed.description || null })
-        .where(eq(journeyNodes.id, parsed.nodeId))
+        .where(eq(journeyNodes.id, targetNodeId))
 
       await t
         .update(journeys)
@@ -184,12 +203,18 @@ export async function updateJourneyNode(input: {
         resourceType: 'journey',
         resourceId: parsed.journeyId,
         resourceLabel: owned.journeyName,
-        before: { nodeId: parsed.nodeId, name: owned.oldName, description: owned.oldDescription },
-        after: { nodeId: parsed.nodeId, name: parsed.label, description: parsed.description || null },
+        before: { nodeId: owned.nodeId, name: owned.oldName, description: owned.oldDescription },
+        after: {
+          nodeId: targetNodeId,
+          name: parsed.label,
+          description: parsed.description || null,
+          ...(createdDraftVersion ? { createdDraftVersion } : {}),
+        },
       })
     })
 
     revalidatePath(`/app/journeys/${parsed.journeyId}`)
+    revalidatePath('/app/journeys')
     return { ok: true, id: parsed.journeyId }
   } catch (error) {
     if (error instanceof ForbiddenError) return { ok: false, error: 'You do not have permission to edit journeys.' }
