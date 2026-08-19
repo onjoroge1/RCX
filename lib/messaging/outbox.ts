@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { and, eq, or } from 'drizzle-orm'
 
 import type { Tx } from '@/lib/audit'
-import type { Scope } from '@/lib/db/scope'
+import type { Environment } from '@/lib/db/scope'
 import {
   messageDeliveryEvents,
   messageDispatches,
@@ -11,6 +11,11 @@ import {
   providerAgentBindings,
 } from '@/lib/db/schema'
 import { newId } from '@/lib/ids'
+
+export type MessagingScope = {
+  workspaceId: string
+  environment: Environment
+}
 
 export type QueueOutboundInput = {
   conversationMessageId: string
@@ -21,7 +26,7 @@ export type QueueOutboundInput = {
 
 async function choosePrimaryProvider(
   tx: Tx,
-  scope: Scope,
+  scope: MessagingScope,
   brandAgentId: string | null,
   requestedChannel: 'rcs' | 'sms',
 ) {
@@ -55,12 +60,12 @@ async function choosePrimaryProvider(
 
 /**
  * Enqueue in the SAME transaction that creates the outbound conversation message.
- * If we cannot route a live message, the originating mutation fails rather than
- * persisting a customer-visible message RCX will never attempt to deliver.
+ * This accepts a system messaging scope rather than a user session Scope because
+ * journey workers are tenant-scoped system actors, not impersonated users.
  */
 export async function queueOutboundConversationMessage(
   tx: Tx,
-  scope: Scope,
+  scope: MessagingScope,
   input: QueueOutboundInput,
 ): Promise<{ dispatchId: string; providerKey: string }> {
   const account = await choosePrimaryProvider(tx, scope, input.brandAgentId, input.requestedChannel)
