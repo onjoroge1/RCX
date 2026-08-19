@@ -17,6 +17,7 @@ import {
 import { newId } from '@/lib/ids'
 import { messageBuilderContentSchema } from './content-schema'
 import { builderContentToCanonical, fallbackText, supportsMessage, textToCanonical } from './canonical'
+import { isResolvedMessageSnapshot } from './personalization'
 import { createMessagingProvider } from './providers/factory'
 import {
   ProviderError,
@@ -88,6 +89,7 @@ async function loadCanonicalMessage(dispatch: DispatchRow): Promise<CanonicalMes
   const [row] = await db
     .select({
       body: conversationMessages.body,
+      content: conversationMessages.content,
       messageVersionId: conversationMessages.messageVersionId,
       versionContent: messageVersions.content,
       smsFallback: messageVersions.smsFallback,
@@ -104,6 +106,14 @@ async function loadCanonicalMessage(dispatch: DispatchRow): Promise<CanonicalMes
     .limit(1)
 
   if (!row) throw new Error('Dispatch conversation message no longer exists')
+
+  // Journey execution snapshots personalization before queueing. Always prefer that
+  // immutable customer-specific payload so provider retries cannot pick up later
+  // CRM/contact/message edits and send different content under the same message ID.
+  if (isResolvedMessageSnapshot(row.content)) {
+    return builderContentToCanonical(row.content.content, row.content.smsFallback)
+  }
+
   if (row.messageVersionId && row.versionContent) {
     return builderContentToCanonical(messageBuilderContentSchema.parse(row.versionContent), row.smsFallback)
   }
@@ -394,8 +404,6 @@ async function trySmsFallback(dispatch: DispatchRow, message: CanonicalMessage):
   const result = await provider.send({
     recipient: dispatch.recipientPhone,
     message: textToCanonical(text),
-    // This is only an RCX trace key for SMS. Twilio does not promise provider-side
-    // idempotency for it, so Twilio fallback failures are never automatically retried.
     idempotencyKey: dispatch.providerRequestId,
   })
   await getTxDb()
