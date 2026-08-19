@@ -94,10 +94,8 @@ export const conversationMessages = pgTable(
     failureReason: failureReasonEnum(),
   },
   (t) => [
-    // Thread order is a database invariant, not merely an application convention.
-    // App writes also serialize on the parent conversation row before allocating
-    // MAX(sequence)+1; this index is the final fail-closed guard.
     uniqueIndex('conversation_messages_thread_unique').on(t.conversationId, t.sequence),
+    index('conversation_messages_provider_idx').on(t.providerKey, t.providerMessageId),
   ],
 )
 
