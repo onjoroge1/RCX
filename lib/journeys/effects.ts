@@ -1,22 +1,18 @@
 import 'server-only'
 
-import { createHash } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 
 import type { Tx } from '@/lib/audit'
 import { journeyEffects } from '@/lib/db/schema'
 import type { Environment } from '@/lib/db/scope'
 import { newId } from '@/lib/ids'
+import { journeyEffectIdempotencyKey } from './idempotency'
 
 export type EffectScope = {
   workspaceId: string
   environment: Environment
   runId: string
   stepId: string
-}
-
-export function journeyEffectIdempotencyKey(runId: string, stepId: string, effectKey: string): string {
-  return createHash('sha256').update(`rcx-journey-effect\u0000${runId}\u0000${stepId}\u0000${effectKey}`).digest('hex')
 }
 
 export async function ensureJourneyEffect(
