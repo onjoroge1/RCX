@@ -5,11 +5,6 @@ import { customAlphabet } from 'nanoid'
 const alphabet = '23456789abcdefghijkmnopqrstuvwxyz'
 const generate = customAlphabet(alphabet, 16)
 
-/**
- * Prefixed identifiers, Stripe-style. The prefix makes an ID self-describing
- * wherever it surfaces — API logs, webhook bodies, support tickets — and keeps
- * seed rows greppable (`ct_james_carter`).
- */
 export const ID_PREFIXES = {
   organization: 'org',
   workspace: 'ws',
@@ -39,6 +34,8 @@ export const ID_PREFIXES = {
   journeyEdge: 'je',
   journeyRun: 'run',
   journeyRunStep: 'rst',
+  journeyRunWait: 'jwait',
+  journeyEffect: 'jfx',
   goal: 'goal',
   outcome: 'out',
   conversation: 'cv',
@@ -74,7 +71,6 @@ export function newId(kind: IdPrefix): string {
   return `${ID_PREFIXES[kind]}_${generate()}`
 }
 
-/** Stable, readable IDs for seed fixtures — `ct_james_carter` rather than a random string. */
 export function seedId(kind: IdPrefix, slug: string): string {
   return `${ID_PREFIXES[kind]}_${slug.replace(/[^a-z0-9]+/gi, '_').toLowerCase()}`
 }
