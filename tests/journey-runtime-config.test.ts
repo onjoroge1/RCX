@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { retryPolicySchema, waitConfigSchema } from '../lib/journeys/runtime-types'
-import { journeyEffectIdempotencyKey } from '../lib/journeys/effects'
+import { journeyEffectIdempotencyKey } from '../lib/journeys/idempotency'
 
 test('duration and event waits validate with bounded timeouts', () => {
   const duration = waitConfigSchema.parse({ mode: 'duration', seconds: 90 })
