@@ -14,24 +14,22 @@ import {
 import {
   edgeKindEnum,
   environmentEnum,
+  journeyEffectStatusEnum,
   journeyNodeKindEnum,
   journeyNodeTypeEnum,
   journeyRunStatusEnum,
   journeyStatusEnum,
+  journeyWaitKindEnum,
+  journeyWaitStatusEnum,
   outcomeKindEnum,
   runStepStatusEnum,
 } from './enums'
 import { workspaces } from './tenancy'
 import { users } from './auth'
 import { contacts } from './contacts'
-import { messages } from './messaging'
+import { messages, messageVersions } from './messaging'
 
-/**
- * Journeys are authoring artifacts: workspace-scoped, NOT environment-scoped.
- * Putting `environment` here would fork every journey into two divergent copies
- * and make §13.3's "promote to live" unexpressible. Promotion lives in
- * `journey_publications` instead.
- */
+/** Journeys are workspace-scoped authoring artifacts; publications select runtime versions per environment. */
 export const journeys = pgTable(
   'journeys',
   {
@@ -68,17 +66,6 @@ export const journeyVersions = pgTable(
   (t) => [uniqueIndex('journey_versions_unique').on(t.journeyId, t.version)],
 )
 
-/**
- * Relational, unlike message content — because the graph IS queried by part:
- * §13.5 needs per-node drop-off, journey_run_steps FK to a node, and analytics
- * asks "which node do people fall out at". JSONB would make each of those a
- * JSON path expression.
- *
- * `config` is JSONB (27 node types with disjoint field sets), but FK-bearing
- * fields are pulled out into real columns. That is also the answer to the missing
- * Message↔Journey M2M: it is not a join table, it is `journey_nodes.message_id`,
- * so §12.1's `usedIn` becomes count(distinct journey_id) rather than a JSON scan.
- */
 export const journeyNodes = pgTable(
   'journey_nodes',
   {
@@ -86,7 +73,7 @@ export const journeyNodes = pgTable(
     journeyVersionId: text()
       .notNull()
       .references(() => journeyVersions.id, { onDelete: 'cascade' }),
-    /** Stable across versions, so run steps and analytics survive a republish. */
+    /** Stable across versions, so analytics can compare the logical node after republish. */
     key: text().notNull(),
     kind: journeyNodeKindEnum().notNull(),
     type: journeyNodeTypeEnum().notNull(),
@@ -98,6 +85,11 @@ export const journeyNodes = pgTable(
     timeoutSeconds: integer(),
     retryPolicy: jsonb(),
     messageId: text().references(() => messages.id, { onDelete: 'set null' }),
+    /**
+     * Frozen at publish time. Without this, editing a message after a journey is
+     * published silently changes production runtime behavior without a journey version.
+     */
+    messageVersionId: text().references(() => messageVersions.id, { onDelete: 'restrict' }),
     connectionId: text(),
     goalId: text(),
   },
@@ -118,7 +110,6 @@ export const journeyEdges = pgTable(
       .notNull()
       .references(() => journeyNodes.id, { onDelete: 'cascade' }),
     label: text(),
-    /** kind='error' serves §13.2's "error path shown where configured". */
     kind: edgeKindEnum().notNull().default('default'),
     condition: jsonb(),
     ordinal: integer().notNull().default(0),
@@ -159,12 +150,17 @@ export const journeyRuns = pgTable(
       .references(() => journeyVersions.id, { onDelete: 'restrict' }),
     contactId: text().references(() => contacts.id, { onDelete: 'cascade' }),
     conversationId: text(),
+    /** Caller-supplied idempotency identity for the trigger that created this run. */
+    triggerKey: text(),
     status: journeyRunStatusEnum().notNull().default('active'),
     currentNodeId: text().references(() => journeyNodes.id, { onDelete: 'set null' }),
-    /** Per-run variable bag. */
     context: jsonb().notNull().default({}),
     enteredAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     resumeAt: timestamp({ withTimezone: true }),
+    /** Worker lease. A stale lock is recoverable; the token prevents an old worker from committing after re-claim. */
+    lockedAt: timestamp({ withTimezone: true }),
+    lockToken: text(),
+    attempts: integer().notNull().default(0),
     completedAt: timestamp({ withTimezone: true }),
     failedAt: timestamp({ withTimezone: true }),
     failureReason: text(),
@@ -172,12 +168,13 @@ export const journeyRuns = pgTable(
   (t) => [
     index('journey_runs_journey_idx').on(t.workspaceId, t.environment, t.journeyId, t.status),
     index('journey_runs_contact_idx').on(t.contactId),
-    // The runner polls this to wake waiting runs.
     index('journey_runs_resume_idx').on(t.status, t.resumeAt),
+    index('journey_runs_lock_idx').on(t.status, t.lockedAt),
+    uniqueIndex('journey_runs_trigger_unique').on(t.workspaceId, t.environment, t.journeyId, t.triggerKey),
   ],
 )
 
-/** Powers §13.4 test mode ("show simulated event payloads") and §13.5 drop-off analysis. */
+/** One durable execution record per visit to a node. A retry reuses the same step row and idempotency identity. */
 export const journeyRunSteps = pgTable(
   'journey_run_steps',
   {
@@ -188,13 +185,88 @@ export const journeyRunSteps = pgTable(
     nodeId: text().references(() => journeyNodes.id, { onDelete: 'set null' }),
     sequence: integer().notNull(),
     status: runStepStatusEnum().notNull().default('pending'),
+    attempts: integer().notNull().default(0),
     startedAt: timestamp({ withTimezone: true }),
+    lastAttemptAt: timestamp({ withTimezone: true }),
     finishedAt: timestamp({ withTimezone: true }),
     input: jsonb(),
     output: jsonb(),
     error: jsonb(),
   },
-  (t) => [uniqueIndex('journey_run_steps_unique').on(t.runId, t.sequence)],
+  (t) => [
+    uniqueIndex('journey_run_steps_unique').on(t.runId, t.sequence),
+    index('journey_run_steps_active_idx').on(t.runId, t.status, t.sequence),
+  ],
+)
+
+/** Durable waits make timer/reply/payment pauses survive deploys, crashes and duplicate events. */
+export const journeyRunWaits = pgTable(
+  'journey_run_waits',
+  {
+    id: text().primaryKey(),
+    workspaceId: text()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    environment: environmentEnum().notNull(),
+    runId: text()
+      .notNull()
+      .references(() => journeyRuns.id, { onDelete: 'cascade' }),
+    stepId: text()
+      .notNull()
+      .references(() => journeyRunSteps.id, { onDelete: 'cascade' }),
+    nodeId: text().references(() => journeyNodes.id, { onDelete: 'set null' }),
+    kind: journeyWaitKindEnum().notNull(),
+    eventKey: text(),
+    match: jsonb(),
+    listenAfter: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    timeoutAt: timestamp({ withTimezone: true }),
+    status: journeyWaitStatusEnum().notNull().default('pending'),
+    resolutionEventId: text(),
+    resolution: jsonb(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp({ withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('journey_run_waits_step_unique').on(t.stepId),
+    index('journey_run_waits_event_idx').on(t.status, t.eventKey, t.listenAfter),
+    index('journey_run_waits_timeout_idx').on(t.status, t.timeoutAt),
+  ],
+)
+
+/**
+ * Idempotency ledger for side effects. A retried step reuses the same effect row
+ * and idempotencyKey, so network/queue/database retries cannot create duplicates.
+ */
+export const journeyEffects = pgTable(
+  'journey_effects',
+  {
+    id: text().primaryKey(),
+    workspaceId: text()
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    environment: environmentEnum().notNull(),
+    runId: text()
+      .notNull()
+      .references(() => journeyRuns.id, { onDelete: 'cascade' }),
+    stepId: text()
+      .notNull()
+      .references(() => journeyRunSteps.id, { onDelete: 'cascade' }),
+    effectKey: text().notNull(),
+    kind: text().notNull(),
+    status: journeyEffectStatusEnum().notNull().default('pending'),
+    idempotencyKey: text().notNull(),
+    externalId: text(),
+    request: jsonb(),
+    result: jsonb(),
+    error: jsonb(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('journey_effects_step_key_unique').on(t.stepId, t.effectKey),
+    uniqueIndex('journey_effects_idempotency_unique').on(t.idempotencyKey),
+    index('journey_effects_run_idx').on(t.runId, t.status),
+  ],
 )
 
 export const goals = pgTable(
@@ -213,11 +285,6 @@ export const goals = pgTable(
   (t) => [uniqueIndex('goals_unique').on(t.workspaceId, t.key)],
 )
 
-/**
- * The single most important analytics table. Every headline in §10.3 and §17.9
- * ("Completed outcomes 12,604", "Attributed revenue $84,240") is a count(*) or
- * sum(value) over this. Without it, revenue attribution stays a formatted string.
- */
 export const outcomes = pgTable(
   'outcomes',
   {
@@ -262,4 +329,6 @@ export const journeyRunsRelations = relations(journeyRuns, ({ one, many }) => ({
   journey: one(journeys, { fields: [journeyRuns.journeyId], references: [journeys.id] }),
   contact: one(contacts, { fields: [journeyRuns.contactId], references: [contacts.id] }),
   steps: many(journeyRunSteps),
+  waits: many(journeyRunWaits),
+  effects: many(journeyEffects),
 }))
