@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 
 import { db } from '@/lib/db'
 import { journeyNodes, messageVersions, messages } from '@/lib/db/schema'
@@ -37,26 +37,31 @@ export async function listMessages(): Promise<MessageListItemDto[]> {
     .where(scoped(messages, scope))
     .orderBy(desc(messages.updatedAt))
 
+  const messageIds = rows.map((row) => row.id)
   const versionIds = rows.map((row) => row.currentVersionId).filter((id): id is string => Boolean(id))
-  const versions = versionIds.length
-    ? await db
-        .select({
-          id: messageVersions.id,
-          version: messageVersions.version,
-          smsFallback: messageVersions.smsFallback,
-        })
-        .from(messageVersions)
-        .where(sql`${messageVersions.id} = any(${versionIds})`)
-    : []
 
-  const usage = await db
-    .select({
-      messageId: journeyNodes.messageId,
-      count: sql<number>`count(distinct ${journeyNodes.journeyVersionId})::int`,
-    })
-    .from(journeyNodes)
-    .where(sql`${journeyNodes.messageId} is not null`)
-    .groupBy(journeyNodes.messageId)
+  const [versions, usage] = await Promise.all([
+    versionIds.length
+      ? db
+          .select({
+            id: messageVersions.id,
+            version: messageVersions.version,
+            smsFallback: messageVersions.smsFallback,
+          })
+          .from(messageVersions)
+          .where(inArray(messageVersions.id, versionIds))
+      : Promise.resolve([]),
+    messageIds.length
+      ? db
+          .select({
+            messageId: journeyNodes.messageId,
+            count: sql<number>`count(distinct ${journeyNodes.journeyVersionId})::int`,
+          })
+          .from(journeyNodes)
+          .where(inArray(journeyNodes.messageId, messageIds))
+          .groupBy(journeyNodes.messageId)
+      : Promise.resolve([]),
+  ])
 
   const versionMap = new Map(versions.map((version) => [version.id, version]))
   const usageMap = new Map(usage.filter((row) => row.messageId).map((row) => [row.messageId!, row.count]))
