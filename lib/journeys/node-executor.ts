@@ -17,7 +17,8 @@ import {
 import type { Environment } from '@/lib/db/scope'
 import { newId } from '@/lib/ids'
 import { queueOutboundConversationMessage } from '@/lib/messaging/outbox'
-import { messageBuilderContentSchema } from '@/lib/messaging/content-schema'
+import { resolvePersonalizationContext } from '@/lib/messaging/personalization-context'
+import { resolveMessageSnapshot } from '@/lib/messaging/personalization'
 import { completeJourneyEffect, ensureJourneyEffect } from './effects'
 import { getPath } from './conditions'
 import {
@@ -282,12 +283,20 @@ async function ensureConversationAndQueueMessage(
   }
 
   const [version] = await tx
-    .select({ content: messageVersions.content })
+    .select({ content: messageVersions.content, smsFallback: messageVersions.smsFallback })
     .from(messageVersions)
     .where(and(eq(messageVersions.id, node.messageVersionId), eq(messageVersions.messageId, node.messageId)))
     .limit(1)
   if (!version) throw new Error('Pinned message version no longer exists')
-  const authored = messageBuilderContentSchema.parse(version.content)
+
+  const personalization = await resolvePersonalizationContext(tx, {
+    workspaceId: run.workspaceId,
+    environment: run.environment,
+    contactId: run.contactId,
+    messageVersionId: node.messageVersionId,
+    runContext: run.context,
+  })
+  const snapshot = resolveMessageSnapshot(version.content, version.smsFallback, personalization)
 
   const [seq] = await tx
     .select({ value: sql<number>`coalesce(max(${conversationMessages.sequence}), 0)::int + 1` })
@@ -304,7 +313,8 @@ async function ensureConversationAndQueueMessage(
     direction: 'outbound',
     actor: 'automation',
     contentType: 'rich_card',
-    body: authored.heading,
+    body: snapshot.content.heading,
+    content: snapshot,
     messageVersionId: node.messageVersionId,
     journeyNodeId: node.id,
     channel: requestedChannel,
@@ -327,7 +337,7 @@ async function ensureConversationAndQueueMessage(
       journeyId: run.journeyId,
       journeyRunId: run.id,
       lastMessageAt: new Date(),
-      lastMessagePreview: authored.heading.slice(0, 140),
+      lastMessagePreview: snapshot.content.heading.slice(0, 140),
       channel: requestedChannel,
     })
     .where(eq(conversations.id, conversationId))
