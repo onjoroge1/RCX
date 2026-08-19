@@ -79,6 +79,7 @@ CREATE TABLE "provider_webhook_events" (
   "payload" jsonb NOT NULL,
   "status" "provider_event_status" DEFAULT 'pending' NOT NULL,
   "attempts" integer DEFAULT 0 NOT NULL,
+  "next_attempt_at" timestamp with time zone,
   "received_at" timestamp with time zone DEFAULT now() NOT NULL,
   "locked_at" timestamp with time zone,
   "processed_at" timestamp with time zone,
@@ -86,7 +87,7 @@ CREATE TABLE "provider_webhook_events" (
   CONSTRAINT "provider_webhook_events_workspace_id_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."workspaces"("id") ON DELETE cascade
 );--> statement-breakpoint
 CREATE UNIQUE INDEX "provider_webhook_events_dedupe_unique" ON "provider_webhook_events" USING btree ("dedupe_key");--> statement-breakpoint
-CREATE INDEX "provider_webhook_events_ready_idx" ON "provider_webhook_events" USING btree ("status", "received_at");--> statement-breakpoint
+CREATE INDEX "provider_webhook_events_ready_idx" ON "provider_webhook_events" USING btree ("status", "next_attempt_at", "received_at");--> statement-breakpoint
 CREATE INDEX "provider_webhook_events_message_idx" ON "provider_webhook_events" USING btree ("provider_key", "provider_message_id");--> statement-breakpoint
 
 CREATE INDEX "conversation_messages_provider_idx" ON "conversation_messages" USING btree ("provider_key", "provider_message_id");
