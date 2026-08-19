@@ -5,6 +5,11 @@ CREATE TYPE "journey_effect_status" AS ENUM ('pending', 'completed', 'failed');-
 ALTER TABLE "journey_nodes" ADD COLUMN "message_version_id" text;--> statement-breakpoint
 ALTER TABLE "journey_nodes" ADD CONSTRAINT "journey_nodes_message_version_id_message_versions_id_fk" FOREIGN KEY ("message_version_id") REFERENCES "public"."message_versions"("id") ON DELETE restrict;--> statement-breakpoint
 
+ALTER TABLE "journey_publications" ADD COLUMN "active" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+ALTER TABLE "journey_publications" ADD COLUMN "paused_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "journey_publications" ADD COLUMN "paused_by" text;--> statement-breakpoint
+ALTER TABLE "journey_publications" ADD CONSTRAINT "journey_publications_paused_by_users_id_fk" FOREIGN KEY ("paused_by") REFERENCES "public"."users"("id") ON DELETE set null;--> statement-breakpoint
+
 ALTER TABLE "journey_runs" ADD COLUMN "trigger_key" text;--> statement-breakpoint
 ALTER TABLE "journey_runs" ADD COLUMN "locked_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "journey_runs" ADD COLUMN "lock_token" text;--> statement-breakpoint
