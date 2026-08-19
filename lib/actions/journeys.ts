@@ -16,6 +16,7 @@ import {
 } from '@/lib/db/schema'
 import { getScope, scoped } from '@/lib/db/scope'
 import { newId } from '@/lib/ids'
+import { prepareJourneyVersionForPublication } from '@/lib/journeys/validation'
 
 export type JourneyActionResult =
   | { ok: true; id?: string }
@@ -148,6 +149,7 @@ export async function updateJourneyNode(input: {
           journeyName: journeys.name,
           oldName: journeyNodes.name,
           oldDescription: journeyNodes.description,
+          versionPublishedAt: journeyVersions.publishedAt,
         })
         .from(journeyNodes)
         .innerJoin(journeyVersions, eq(journeyVersions.id, journeyNodes.journeyVersionId))
@@ -163,6 +165,9 @@ export async function updateJourneyNode(input: {
         .for('update')
 
       if (!owned) throw new Error('Journey node not found.')
+      if (owned.versionPublishedAt) {
+        throw new Error('Published journey versions are immutable. Create a new draft version before editing.')
+      }
 
       await t
         .update(journeyNodes)
@@ -224,6 +229,11 @@ async function setJourneyRuntimeState(
       if (journey.status === status) return
 
       if (status === 'published') {
+        await prepareJourneyVersionForPublication(t, {
+          workspaceId: scope.workspaceId,
+          versionId: journey.versionId,
+        })
+
         await t
           .insert(journeyPublications)
           .values({
