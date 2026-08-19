@@ -29,6 +29,15 @@ export type JourneyListItemDto = {
   publishedVersionId: string | null
 }
 
+function environmentStatus(
+  authoringStatus: JourneyListItemDto['status'],
+  publication: { active: boolean } | undefined,
+): JourneyListItemDto['status'] {
+  if (authoringStatus === 'archived') return 'archived'
+  if (!publication) return 'draft'
+  return publication.active ? 'published' : 'paused'
+}
+
 export async function listJourneys(): Promise<JourneyListItemDto[]> {
   assertNotForcedError()
   const scope = await getScope()
@@ -68,13 +77,17 @@ export async function listJourneys(): Promise<JourneyListItemDto[]> {
       .where(scoped(metricMessagingDaily, scope))
       .groupBy(metricMessagingDaily.journeyId, metricMessagingDaily.channel),
     db
-      .select({ journeyId: journeyPublications.journeyId, versionId: journeyPublications.versionId })
+      .select({
+        journeyId: journeyPublications.journeyId,
+        versionId: journeyPublications.versionId,
+        active: journeyPublications.active,
+      })
       .from(journeyPublications)
       .where(eq(journeyPublications.environment, scope.environment)),
   ])
 
   const metricMap = new Map(metrics.map((row) => [row.journeyId, row]))
-  const pubMap = new Map(publications.map((row) => [row.journeyId, row.versionId]))
+  const pubMap = new Map(publications.map((row) => [row.journeyId, row]))
   const channelMap = new Map<string, { total: number; rcs: number }>()
   for (const row of channels) {
     const current = channelMap.get(row.journeyId) ?? { total: 0, rcs: 0 }
@@ -86,14 +99,16 @@ export async function listJourneys(): Promise<JourneyListItemDto[]> {
   return rows.map((row) => {
     const metric = metricMap.get(row.id)
     const channel = channelMap.get(row.id)
+    const publication = pubMap.get(row.id)
     return {
       ...row,
+      status: environmentStatus(row.status, publication),
       entered: metric?.entered ?? 0,
       completed: metric?.completed ?? 0,
       failed: metric?.failed ?? 0,
       value: Number(metric?.value ?? 0),
       rcsRate: channel && channel.total > 0 ? channel.rcs / channel.total : null,
-      publishedVersionId: pubMap.get(row.id) ?? null,
+      publishedVersionId: publication?.versionId ?? null,
     }
   })
 }
@@ -172,7 +187,7 @@ export async function getJourneyBuilder(journeyId: string): Promise<JourneyBuild
 
   if (!version) return null
 
-  const [nodes, edges, healthRows, channelRows] = await Promise.all([
+  const [nodes, edges, healthRows, channelRows, publicationRows] = await Promise.all([
     db
       .select()
       .from(journeyNodes)
@@ -201,18 +216,29 @@ export async function getJourneyBuilder(journeyId: string): Promise<JourneyBuild
       .from(metricMessagingDaily)
       .where(and(scoped(metricMessagingDaily, scope), eq(metricMessagingDaily.journeyId, journey.id)))
       .groupBy(metricMessagingDaily.channel),
+    db
+      .select({ active: journeyPublications.active, versionId: journeyPublications.versionId })
+      .from(journeyPublications)
+      .where(
+        and(
+          eq(journeyPublications.journeyId, journey.id),
+          eq(journeyPublications.environment, scope.environment),
+        ),
+      )
+      .limit(1),
   ])
 
   const entered = healthRows[0]?.entered ?? 0
   const completed = healthRows[0]?.completed ?? 0
   const totalSent = channelRows.reduce((sum, row) => sum + row.sent, 0)
   const rcsSent = channelRows.find((row) => row.channel === 'rcs')?.sent ?? 0
+  const publication = publicationRows[0]
 
   return {
     id: journey.id,
     name: journey.name,
     description: journey.description,
-    status: journey.status,
+    status: environmentStatus(journey.status, publication),
     versionId: version.id,
     version: version.version,
     nodes: nodes.map((node) => ({
