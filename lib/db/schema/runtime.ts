@@ -35,11 +35,6 @@ export const providerEventStatusEnum = pgEnum('provider_event_status', [
   'failed',
 ])
 
-/**
- * Plain routing metadata for one provider account. Credentials stay encrypted on
- * provider_accounts; the external agent id must be queryable so an inbound Google
- * callback can be routed to the correct tenant before any business processing.
- */
 export const providerAgentBindings = pgTable(
   'provider_agent_bindings',
   {
@@ -66,11 +61,7 @@ export const providerAgentBindings = pgTable(
   ],
 )
 
-/**
- * Durable outbound provider outbox. The customer-facing mutation commits this row
- * with the conversation message; network I/O happens later in the worker. The
- * providerRequestId is generated once and survives retries.
- */
+/** Durable outbound provider outbox. */
 export const messageDispatches = pgTable(
   'message_dispatches',
   {
@@ -135,10 +126,7 @@ export const recipientCapabilities = pgTable(
   ],
 )
 
-/**
- * Durable inbound provider inbox. Webhook routes only authenticate, normalize and
- * insert here, then return 200. A worker owns conversation/delivery mutations.
- */
+/** Durable inbound provider inbox. */
 export const providerWebhookEvents = pgTable(
   'provider_webhook_events',
   {
@@ -157,6 +145,7 @@ export const providerWebhookEvents = pgTable(
     payload: jsonb().notNull(),
     status: providerEventStatusEnum().notNull().default('pending'),
     attempts: integer().notNull().default(0),
+    nextAttemptAt: timestamp({ withTimezone: true }),
     receivedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     lockedAt: timestamp({ withTimezone: true }),
     processedAt: timestamp({ withTimezone: true }),
@@ -164,7 +153,7 @@ export const providerWebhookEvents = pgTable(
   },
   (t) => [
     uniqueIndex('provider_webhook_events_dedupe_unique').on(t.dedupeKey),
-    index('provider_webhook_events_ready_idx').on(t.status, t.receivedAt),
+    index('provider_webhook_events_ready_idx').on(t.status, t.nextAttemptAt, t.receivedAt),
     index('provider_webhook_events_message_idx').on(t.providerKey, t.providerMessageId),
   ],
 )
