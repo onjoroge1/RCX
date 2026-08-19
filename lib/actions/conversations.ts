@@ -10,6 +10,7 @@ import {
   conversationEvents,
   conversationMessages,
   conversations,
+  platformEvents,
   users,
 } from '@/lib/db/schema'
 import { getScope, scoped } from '@/lib/db/scope'
@@ -22,10 +23,6 @@ export type ActionResult = { ok: true } | { ok: false; error: string }
 
 const conversationIdSchema = z.string().min(1).max(64)
 
-/**
- * Scoped fetch + existence check. The row lock is also the thread sequencing lock:
- * every mutation that appends a message holds it before MAX(sequence)+1.
- */
 async function loadConversation(tx: Tx, id: string) {
   const scope = await getScope()
   const [row] = await tx
@@ -85,6 +82,16 @@ export async function takeOverConversation(rawId: string): Promise<ActionResult>
         payload: { from: conversation.status },
       })
 
+      await t.insert(platformEvents).values({
+        id: newId('platformEvent'),
+        workspaceId: scope.workspaceId,
+        environment: scope.environment,
+        key: 'conversation.taken_over',
+        resourceType: 'conversation',
+        resourceId: id,
+        payload: { actorUserId: scope.userId, previousStatus: conversation.status },
+      })
+
       await t.insert(conversationMessages).values({
         id: newId('conversationMessage'),
         workspaceId: scope.workspaceId,
@@ -138,6 +145,16 @@ export async function resumeAutomation(rawId: string): Promise<ActionResult> {
         conversationId: id,
         kind: 'returned_to_automation',
         actorUserId: scope.userId,
+      })
+
+      await t.insert(platformEvents).values({
+        id: newId('platformEvent'),
+        workspaceId: scope.workspaceId,
+        environment: scope.environment,
+        key: 'conversation.returned_to_automation',
+        resourceType: 'conversation',
+        resourceId: id,
+        payload: { actorUserId: scope.userId },
       })
 
       await t.insert(conversationMessages).values({
