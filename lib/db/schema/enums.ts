@@ -92,7 +92,6 @@ export const journeyNodeKindEnum = pgEnum('journey_node_kind', [
 ])
 /** The full §13.2 node library, verbatim. */
 export const journeyNodeTypeEnum = pgEnum('journey_node_type', [
-  // start
   'api_event',
   'webhook',
   'schedule',
@@ -100,30 +99,25 @@ export const journeyNodeTypeEnum = pgEnum('journey_node_type', [
   'crm_field_changed',
   'payment_due',
   'order_status',
-  // message
   'send_message',
   'present_replies',
   'send_fallback',
   'request_free_text',
-  // logic
   'wait',
   'condition',
   'split',
   'capability_check',
   'time_window',
-  // integrations
   'http_request',
   'create_booking',
   'generate_payment_link',
   'update_crm',
   'create_ticket',
   'publish_event',
-  // human
   'assign_agent',
   'pause_automation',
   'notify_team',
   'approval',
-  // end
   'goal',
   'end',
 ])
@@ -137,6 +131,18 @@ export const journeyRunStatusEnum = pgEnum('journey_run_status', [
   'cancelled',
 ])
 export const runStepStatusEnum = pgEnum('run_step_status', ['pending', 'running', 'succeeded', 'failed', 'skipped'])
+export const journeyWaitStatusEnum = pgEnum('journey_wait_status', [
+  'pending',
+  'resolved',
+  'timed_out',
+  'cancelled',
+])
+export const journeyWaitKindEnum = pgEnum('journey_wait_kind', ['timer', 'event'])
+export const journeyEffectStatusEnum = pgEnum('journey_effect_status', [
+  'pending',
+  'completed',
+  'failed',
+])
 export const outcomeKindEnum = pgEnum('outcome_kind', [
   'booking',
   'payment',
@@ -232,10 +238,6 @@ export const integrationCategoryEnum = pgEnum('integration_category', [
   'commerce',
   'developer',
 ])
-/**
- * Note: 'available' is deliberately absent. It is not a connection state — it is the
- * *absence* of a connection row. The UI computes it by left-joining the provider catalog.
- */
 export const connectionStateEnum = pgEnum('connection_state', ['connected', 'warning', 'error', 'disconnected'])
 export const mappingDirectionEnum = pgEnum('mapping_direction', ['inbound', 'outbound'])
 export const eventStatusEnum = pgEnum('event_status', ['succeeded', 'failed', 'retrying', 'pending'])
@@ -264,7 +266,6 @@ export const flowStageEnum = pgEnum('flow_stage', [
   'confirmation',
   'recovery',
 ])
-/** Mirrors the FlowNode union in data/flows.ts. */
 export const flowNodeKindEnum = pgEnum('flow_node_kind', [
   'system',
   'business',
