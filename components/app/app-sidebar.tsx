@@ -37,8 +37,8 @@ const groups: { label: string; items: { label: string; href: string; icon: React
   {
     label: 'Build',
     items: [
-      { label: 'Message Builder', href: '/app/message-builder', icon: PencilRuler },
-      { label: 'Journey Builder', href: '/app/journeys', icon: Workflow },
+      { label: 'Messages', href: '/app/messages', icon: PencilRuler },
+      { label: 'Journeys', href: '/app/journeys', icon: Workflow },
       { label: 'Customer flows', href: '/app/flows', icon: Smartphone },
       { label: 'Templates', href: '/app/templates', icon: LayoutTemplate },
       { label: 'Brand & identity', href: '/app/brand', icon: BadgeCheck },
