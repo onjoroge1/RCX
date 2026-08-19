@@ -1,4 +1,9 @@
-import { extractVariables, messageBuilderContentSchema, type MessageBuilderContent } from './content-schema'
+import {
+  extractVariables,
+  messageBuilderContentSchema,
+  postbackKey,
+  type MessageBuilderContent,
+} from './content-schema'
 
 export type PersonalizationValue = string | number | boolean | null | undefined
 export type PersonalizationMap = Record<string, PersonalizationValue>
@@ -9,6 +14,9 @@ export type ResolvedMessageSnapshot = {
   content: MessageBuilderContent
   smsFallback: string | null
   resolvedVariables: string[]
+  /** Stable identities derived from authored labels, before display personalization. */
+  actionPostbackData: string[]
+  chipPostbackData: string[]
 }
 
 function renderValue(value: PersonalizationValue): string | null {
@@ -45,6 +53,12 @@ export function resolveMessageSnapshot(
   const fallback = smsFallback ?? ''
   const required = extractVariables(content, fallback)
 
+  // Capture behavior keys from authored labels BEFORE replacing customer-specific
+  // variables. The customer can see “Book for Thursday” while the workflow always
+  // receives the same stable postback identity for that authored action.
+  const actionPostbackData = content.actions.map((label, ordinal) => postbackKey(label, ordinal))
+  const chipPostbackData = content.chips.map((label, ordinal) => `chip_${postbackKey(label, ordinal)}`)
+
   const heading = interpolateTemplate(content.heading, values)
   const description = interpolateTemplate(content.description, values)
   const actions = content.actions.map((value) => interpolateTemplate(value, values))
@@ -59,9 +73,6 @@ export function resolveMessageSnapshot(
     ...fallbackResult.missing,
   ])
 
-  // Treat every authored merge variable as required unless a value/default was
-  // resolved by the server. Failing before queueing is safer than exposing raw
-  // {{tokens}} to a customer or silently replacing them with empty strings.
   for (const key of required) {
     if (renderValue(values[key]) === null) missing.add(key)
   }
@@ -81,6 +92,8 @@ export function resolveMessageSnapshot(
     },
     smsFallback: fallback ? fallbackResult.text : null,
     resolvedVariables: required,
+    actionPostbackData,
+    chipPostbackData,
   }
 }
 
