@@ -3,7 +3,14 @@ import 'server-only'
 import { and, asc, eq, gte, isNotNull, isNull, lte, or } from 'drizzle-orm'
 
 import { db, getTxDb } from '@/lib/db'
-import { journeyEffects, journeyRunWaits, journeyRuns, platformEvents } from '@/lib/db/schema'
+import {
+  journeyEdges,
+  journeyEffects,
+  journeyRunSteps,
+  journeyRunWaits,
+  journeyRuns,
+  platformEvents,
+} from '@/lib/db/schema'
 import { matchesFlatPaths } from './conditions'
 
 export type JourneyWakeResult = {
@@ -27,16 +34,19 @@ function eventSubject(row: {
 }
 
 /**
- * A present-replies/free-text node may already be waiting for the customer when
- * Phase 2 eventually determines its outbound dispatch permanently failed. Do not
- * make that run sit until the customer-response timeout; wake it immediately so
- * its configured error edge can execute.
+ * A response-waiting message can permanently fail after the journey step has
+ * already paused. Phase 2 emits message.failed only after its own safe retries are
+ * exhausted, so retrying the journey's same send effect cannot help. Route the
+ * current step directly through its error edge, or fail the run immediately when
+ * no error edge exists.
  */
 async function resolveMessageFailureWaits(): Promise<number> {
   const waits = await db
     .select({
       id: journeyRunWaits.id,
       runId: journeyRunWaits.runId,
+      stepId: journeyRunWaits.stepId,
+      nodeId: journeyRunWaits.nodeId,
       workspaceId: journeyRunWaits.workspaceId,
       environment: journeyRunWaits.environment,
       listenAfter: journeyRunWaits.listenAfter,
@@ -59,7 +69,8 @@ async function resolveMessageFailureWaits(): Promise<number> {
   let resolved = 0
   const txDb = getTxDb()
   for (const wait of waits) {
-    if (!wait.conversationMessageId) continue
+    if (!wait.conversationMessageId || !wait.nodeId) continue
+
     const [failure] = await db
       .select({
         id: platformEvents.id,
@@ -82,7 +93,15 @@ async function resolveMessageFailureWaits(): Promise<number> {
       .limit(1)
     if (!failure) continue
 
+    const [errorEdge] = await db
+      .select({ toNodeId: journeyEdges.toNodeId })
+      .from(journeyEdges)
+      .where(and(eq(journeyEdges.fromNodeId, wait.nodeId), eq(journeyEdges.kind, 'error')))
+      .orderBy(asc(journeyEdges.ordinal))
+      .limit(1)
+
     await txDb.transaction(async (tx) => {
+      const now = new Date()
       const [updated] = await tx
         .update(journeyRunWaits)
         .set({
@@ -95,16 +114,49 @@ async function resolveMessageFailureWaits(): Promise<number> {
             payload: failure.payload,
             occurredAt: failure.occurredAt.toISOString(),
           },
-          resolvedAt: new Date(),
+          resolvedAt: now,
         })
         .where(and(eq(journeyRunWaits.id, wait.id), eq(journeyRunWaits.status, 'pending')))
         .returning({ id: journeyRunWaits.id })
       if (!updated) return
 
       await tx
-        .update(journeyRuns)
-        .set({ status: 'active', resumeAt: null, lockedAt: null, lockToken: null })
-        .where(and(eq(journeyRuns.id, wait.runId), eq(journeyRuns.status, 'waiting')))
+        .update(journeyRunSteps)
+        .set({
+          status: 'failed',
+          finishedAt: now,
+          error: {
+            code: 'message_failed',
+            providerEventId: failure.id,
+            conversationMessageId: wait.conversationMessageId,
+          },
+        })
+        .where(eq(journeyRunSteps.id, wait.stepId))
+
+      if (errorEdge) {
+        await tx
+          .update(journeyRuns)
+          .set({
+            status: 'active',
+            currentNodeId: errorEdge.toNodeId,
+            resumeAt: null,
+            lockedAt: null,
+            lockToken: null,
+          })
+          .where(and(eq(journeyRuns.id, wait.runId), eq(journeyRuns.status, 'waiting')))
+      } else {
+        await tx
+          .update(journeyRuns)
+          .set({
+            status: 'failed',
+            failedAt: now,
+            failureReason: 'Outbound message permanently failed and the node has no error edge',
+            resumeAt: null,
+            lockedAt: null,
+            lockToken: null,
+          })
+          .where(and(eq(journeyRuns.id, wait.runId), eq(journeyRuns.status, 'waiting')))
+      }
       resolved += 1
     })
   }
@@ -268,10 +320,9 @@ async function resolveRetrySleeps(now: Date): Promise<number> {
 }
 
 export async function wakeJourneyRuns(now = new Date()): Promise<JourneyWakeResult> {
-  // A terminal outbound failure should beat both customer-response and timeout paths.
   const messageFailures = await resolveMessageFailureWaits()
-  // Event callbacks that occurred before their deadline win even if the worker only
-  // wakes after that deadline. A genuinely late event is excluded by timeoutAt.
+  // A callback that occurred before its deadline wins even if the worker only wakes
+  // after that deadline. Genuinely late events are excluded by timeoutAt above.
   const events = await resolveEventWaits()
   const timerResult = await resolveTimerAndTimeoutWaits(now)
   const retries = await resolveRetrySleeps(now)
