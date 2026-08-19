@@ -106,12 +106,25 @@ export class GoogleRbmProvider implements MessagingProvider {
     }
   }
 
+  private async request(url: URL, init: RequestInit, operation: string): Promise<Response> {
+    const headers = await this.headers()
+    try {
+      return await this.fetchImpl(url, { ...init, headers: { ...headers, ...(init.headers ?? {}) } })
+    } catch (error) {
+      throw new ProviderError(`Google RBM ${operation}: network request failed`, {
+        code: 'transient',
+        retryable: true,
+        cause: error,
+      })
+    }
+  }
+
   async getCapabilities(recipient: string): Promise<ProviderCapabilities> {
     const url = new URL(`${endpoint(this.region)}/v1/phones/${recipient}/capabilities`)
     url.searchParams.set('requestId', randomUUID())
     url.searchParams.set('agentId', this.agentId)
 
-    const response = await this.fetchImpl(url, { method: 'GET', headers: await this.headers() })
+    const response = await this.request(url, { method: 'GET' }, 'capability check')
     if (response.status === 404) {
       return { reachable: false, features: [], checkedAt: new Date(), raw: await responsePayload(response) }
     }
@@ -134,17 +147,14 @@ export class GoogleRbmProvider implements MessagingProvider {
     const body = toGoogleAgentMessage(request.message)
     if (request.ttlSeconds && request.ttlSeconds > 0) body.ttl = `${Math.floor(request.ttlSeconds)}s`
 
-    const response = await this.fetchImpl(url, {
-      method: 'POST',
-      headers: await this.headers(),
-      body: JSON.stringify(body),
-    })
+    const response = await this.request(
+      url,
+      { method: 'POST', body: JSON.stringify(body) },
+      'send',
+    )
     const raw = await responsePayload(response)
     if (!response.ok) throw providerError(response.status, raw, 'send')
 
-    // Google delivery/read callbacks reference the agent-assigned messageId, not a
-    // newly generated server ID. Reusing the UUID here on retries is what prevents
-    // duplicate sends after ambiguous client/network failures.
     return {
       providerMessageId: request.idempotencyKey,
       channel: 'rcs',
@@ -154,11 +164,9 @@ export class GoogleRbmProvider implements MessagingProvider {
   }
 
   async revoke(recipient: string, providerMessageId: string): Promise<void> {
-    const url = new URL(
-      `${endpoint(this.region)}/v1/phones/${recipient}/agentMessages/${providerMessageId}`,
-    )
+    const url = new URL(`${endpoint(this.region)}/v1/phones/${recipient}/agentMessages/${providerMessageId}`)
     url.searchParams.set('agentId', this.agentId)
-    const response = await this.fetchImpl(url, { method: 'DELETE', headers: await this.headers() })
+    const response = await this.request(url, { method: 'DELETE' }, 'revoke')
     if (!response.ok) throw providerError(response.status, await responsePayload(response), 'revoke')
   }
 
@@ -171,11 +179,11 @@ export class GoogleRbmProvider implements MessagingProvider {
         ? { eventType: 'READ', messageId: event.providerMessageId }
         : { eventType: 'IS_TYPING' }
 
-    const response = await this.fetchImpl(url, {
-      method: 'POST',
-      headers: await this.headers(),
-      body: JSON.stringify(body),
-    })
+    const response = await this.request(
+      url,
+      { method: 'POST', body: JSON.stringify(body) },
+      'agent event',
+    )
     if (!response.ok) throw providerError(response.status, await responsePayload(response), 'agent event')
   }
 }
