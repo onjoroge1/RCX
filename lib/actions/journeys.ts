@@ -226,8 +226,22 @@ async function setJourneyRuntimeState(
 
       if (!journey) throw new Error('Journey not found.')
       if (!journey.versionId) throw new Error('Journey has no current version.')
-      if (journey.status === status) return
 
+      const [beforePublication] = await t
+        .select({
+          active: journeyPublications.active,
+          versionId: journeyPublications.versionId,
+        })
+        .from(journeyPublications)
+        .where(
+          and(
+            eq(journeyPublications.journeyId, id),
+            eq(journeyPublications.environment, scope.environment),
+          ),
+        )
+        .limit(1)
+
+      let globalStatus: 'published' | 'paused' = 'published'
       if (status === 'published') {
         await prepareJourneyVersionForPublication(t, {
           workspaceId: scope.workspaceId,
@@ -240,22 +254,52 @@ async function setJourneyRuntimeState(
             journeyId: id,
             environment: scope.environment,
             versionId: journey.versionId,
+            active: true,
             publishedBy: scope.userId,
+            pausedAt: null,
+            pausedBy: null,
           })
           .onConflictDoUpdate({
             target: [journeyPublications.journeyId, journeyPublications.environment],
-            set: { versionId: journey.versionId, publishedAt: new Date(), publishedBy: scope.userId },
+            set: {
+              versionId: journey.versionId,
+              active: true,
+              publishedAt: new Date(),
+              publishedBy: scope.userId,
+              pausedAt: null,
+              pausedBy: null,
+            },
           })
 
         await t
           .update(journeyVersions)
           .set({ publishedAt: new Date() })
           .where(eq(journeyVersions.id, journey.versionId))
+      } else {
+        const [paused] = await t
+          .update(journeyPublications)
+          .set({ active: false, pausedAt: new Date(), pausedBy: scope.userId })
+          .where(
+            and(
+              eq(journeyPublications.journeyId, id),
+              eq(journeyPublications.environment, scope.environment),
+              eq(journeyPublications.active, true),
+            ),
+          )
+          .returning({ journeyId: journeyPublications.journeyId })
+        if (!paused) throw new Error(`Journey is not active in ${scope.environment}.`)
+
+        const [otherActive] = await t
+          .select({ journeyId: journeyPublications.journeyId })
+          .from(journeyPublications)
+          .where(and(eq(journeyPublications.journeyId, id), eq(journeyPublications.active, true)))
+          .limit(1)
+        globalStatus = otherActive ? 'published' : 'paused'
       }
 
       await t
         .update(journeys)
-        .set({ status, updatedAt: new Date() })
+        .set({ status: globalStatus, updatedAt: new Date() })
         .where(and(scoped(journeys, scope), eq(journeys.id, id)))
 
       await recordAudit(t, scope, {
@@ -263,8 +307,18 @@ async function setJourneyRuntimeState(
         resourceType: 'journey',
         resourceId: id,
         resourceLabel: journey.name,
-        before: { status: journey.status },
-        after: { status, environment: scope.environment, versionId: journey.versionId },
+        before: {
+          authoringStatus: journey.status,
+          environment: scope.environment,
+          environmentActive: beforePublication?.active ?? false,
+          environmentVersionId: beforePublication?.versionId ?? null,
+        },
+        after: {
+          authoringStatus: globalStatus,
+          environment: scope.environment,
+          environmentActive: status === 'published',
+          environmentVersionId: journey.versionId,
+        },
       })
     })
 
