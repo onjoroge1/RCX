@@ -1,5 +1,7 @@
 import { createSign } from 'node:crypto'
 
+import { ProviderError } from '../runtime-types'
+
 export const GOOGLE_RBM_SCOPE = 'https://www.googleapis.com/auth/rcsbusinessmessaging'
 const DEFAULT_TOKEN_URI = 'https://oauth2.googleapis.com/token'
 
@@ -47,8 +49,6 @@ export async function getGoogleAccessToken(
 ): Promise<string> {
   const key = serviceAccount.client_email
   const cached = tokenCache.get(key)
-  // Keep a five-minute safety window so a long provider request never starts with
-  // a token that is about to expire.
   if (cached && cached.expiresAtMs - Date.now() > 5 * 60_000) return cached.accessToken
 
   const tokenUri = serviceAccount.token_uri || DEFAULT_TOKEN_URI
@@ -58,11 +58,21 @@ export async function getGoogleAccessToken(
     assertion,
   })
 
-  const response = await fetchImpl(tokenUri, {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body,
-  })
+  let response: Response
+  try {
+    response = await fetchImpl(tokenUri, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+  } catch (error) {
+    throw new ProviderError('Google OAuth token exchange could not reach Google', {
+      code: 'transient',
+      retryable: true,
+      cause: error,
+    })
+  }
+
   const payload = (await response.json().catch(() => ({}))) as {
     access_token?: string
     expires_in?: number
@@ -71,8 +81,14 @@ export async function getGoogleAccessToken(
   }
 
   if (!response.ok || !payload.access_token) {
-    throw new Error(
+    throw new ProviderError(
       `Google OAuth token exchange failed (${response.status}): ${payload.error_description || payload.error || 'unknown error'}`,
+      {
+        code: response.status >= 500 || response.status === 429 ? 'transient' : 'authentication',
+        retryable: response.status >= 500 || response.status === 429,
+        statusCode: response.status,
+        raw: payload,
+      },
     )
   }
 
