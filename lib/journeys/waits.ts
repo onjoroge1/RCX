@@ -81,6 +81,7 @@ async function resolveEventWaits(): Promise<number> {
       eventKey: journeyRunWaits.eventKey,
       match: journeyRunWaits.match,
       listenAfter: journeyRunWaits.listenAfter,
+      timeoutAt: journeyRunWaits.timeoutAt,
     })
     .from(journeyRunWaits)
     .where(and(eq(journeyRunWaits.status, 'pending'), eq(journeyRunWaits.kind, 'event')))
@@ -106,6 +107,7 @@ async function resolveEventWaits(): Promise<number> {
           eq(platformEvents.environment, wait.environment),
           eq(platformEvents.key, wait.eventKey),
           gte(platformEvents.occurredAt, wait.listenAfter),
+          wait.timeoutAt ? lte(platformEvents.occurredAt, wait.timeoutAt) : undefined,
         ),
       )
       .orderBy(asc(platformEvents.occurredAt))
@@ -180,8 +182,10 @@ async function resolveRetrySleeps(now: Date): Promise<number> {
 }
 
 export async function wakeJourneyRuns(now = new Date()): Promise<JourneyWakeResult> {
-  const timerResult = await resolveTimerAndTimeoutWaits(now)
+  // Event callbacks that occurred before their deadline win even if the worker only
+  // wakes after that deadline. A genuinely late event is excluded by timeoutAt.
   const events = await resolveEventWaits()
+  const timerResult = await resolveTimerAndTimeoutWaits(now)
   const retries = await resolveRetrySleeps(now)
   return { ...timerResult, events, retries }
 }
