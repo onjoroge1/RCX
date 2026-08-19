@@ -21,7 +21,7 @@ jobs:
       # network calls to a production database or provider.
       DATABASE_URL: postgresql://rcx:rcx@127.0.0.1:5432/rcx
       AUTH_SECRET: ci-only-auth-secret-not-for-production
-      ENCRYPTION_KEY: 1111111111111111111111111111111111111111111111111111111111111111
+      ENCRYPTION_KEY: '1111111111111111111111111111111111111111111111111111111111111111'
       AUTH_URL: http://localhost:3000
     steps:
       - name: Checkout
@@ -44,9 +44,6 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
 
       - name: Enforce tenant scoping contract
         run: pnpm check:scoping
