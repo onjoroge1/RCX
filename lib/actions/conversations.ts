@@ -31,7 +31,14 @@ export type ActionResult = { ok: true } | { ok: false; error: string }
 
 const conversationIdSchema = z.string().min(1).max(64)
 
-/** Scoped fetch + existence check, so a foreign id fails as not-found, not as a leak. */
+/**
+ * Scoped fetch + existence check, so a foreign id fails as not-found, not as a leak.
+ *
+ * The row lock is also the thread sequencing lock. Every conversation mutation that
+ * can append a message calls this before nextSequence(), so concurrent agent replies,
+ * takeovers and resume events serialize on one conversation row rather than both
+ * observing the same MAX(sequence). This closes the first real write-path race.
+ */
 async function loadConversation(tx: Tx, id: string) {
   const scope = await getScope()
   const [row] = await tx
@@ -45,10 +52,14 @@ async function loadConversation(tx: Tx, id: string) {
     .from(conversations)
     .where(and(scoped(conversations, scope), eq(conversations.id, id)))
     .limit(1)
+    .for('update')
   return { scope, conversation: row }
 }
 
-/** Next sequence for a thread. conversation_messages.sequence is NOT NULL. */
+/**
+ * Next sequence for a thread. Safe because loadConversation() holds FOR UPDATE on
+ * the parent conversation for the lifetime of the surrounding transaction.
+ */
 async function nextSequence(tx: Tx, conversationId: string) {
   const [row] = await tx
     .select({ max: sql<number>`coalesce(max(${conversationMessages.sequence}), 0)::int` })
