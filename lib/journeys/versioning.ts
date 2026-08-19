@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
 
 import type { Tx } from '@/lib/audit'
 import { journeyEdges, journeyNodes, journeys, journeyVersions } from '@/lib/db/schema'
@@ -30,9 +30,14 @@ export async function cloneJourneyVersion(
   const [source] = await tx
     .select({ id: journeyVersions.id, version: journeyVersions.version })
     .from(journeyVersions)
-    .where(eq(journeyVersions.id, input.sourceVersionId))
+    .where(
+      and(
+        eq(journeyVersions.id, input.sourceVersionId),
+        eq(journeyVersions.journeyId, input.journeyId),
+      ),
+    )
     .limit(1)
-  if (!source) throw new Error('Source journey version not found.')
+  if (!source) throw new Error('Source journey version not found for this journey.')
 
   const [maxVersion] = await tx
     .select({ value: sql<number>`coalesce(max(${journeyVersions.version}), 0)::int` })
