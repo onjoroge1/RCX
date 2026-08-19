@@ -70,6 +70,23 @@ export const retryPolicySchema = z.object({
 export type WaitConfig = z.infer<typeof waitConfigSchema>
 export type RetryPolicy = z.infer<typeof retryPolicySchema>
 
+/**
+ * Runtime-aware error. `retryable=false` means repeating the same node cannot fix
+ * the problem (for example, the already-queued message permanently failed), so
+ * the runner should go straight to the configured error edge.
+ */
+export class JourneyNodeExecutionError extends Error {
+  readonly retryable: boolean
+  readonly code?: string
+
+  constructor(message: string, options: { retryable?: boolean; code?: string; cause?: unknown } = {}) {
+    super(message, { cause: options.cause })
+    this.name = 'JourneyNodeExecutionError'
+    this.retryable = options.retryable ?? true
+    this.code = options.code
+  }
+}
+
 export type RuntimeEventView = {
   id: string
   key: string
