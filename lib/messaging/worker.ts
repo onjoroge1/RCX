@@ -107,11 +107,11 @@ async function loadCanonicalMessage(dispatch: DispatchRow): Promise<CanonicalMes
 
   if (!row) throw new Error('Dispatch conversation message no longer exists')
 
-  // Journey execution snapshots personalization before queueing. Always prefer that
-  // immutable customer-specific payload so provider retries cannot pick up later
-  // CRM/contact/message edits and send different content under the same message ID.
   if (isResolvedMessageSnapshot(row.content)) {
-    return builderContentToCanonical(row.content.content, row.content.smsFallback)
+    return builderContentToCanonical(row.content.content, row.content.smsFallback, {
+      actionPostbackData: row.content.actionPostbackData,
+      chipPostbackData: row.content.chipPostbackData,
+    })
   }
 
   if (row.messageVersionId && row.versionContent) {
