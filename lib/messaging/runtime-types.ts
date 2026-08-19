@@ -93,6 +93,15 @@ export type ProviderEvent =
       raw: unknown
     }
   | {
+      kind: 'consent'
+      providerEventId: string
+      agentId: string
+      senderPhoneNumber: string
+      state: 'subscribed' | 'unsubscribed'
+      occurredAt: Date
+      raw: unknown
+    }
+  | {
       kind: 'agent_state'
       providerEventId: string
       agentId: string
