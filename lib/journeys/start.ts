@@ -38,7 +38,7 @@ export async function startJourneyRun(input: StartJourneyRunInput): Promise<Star
   const [publication] = await db
     .select({
       versionId: journeyPublications.versionId,
-      journeyStatus: journeys.status,
+      active: journeyPublications.active,
     })
     .from(journeyPublications)
     .innerJoin(journeys, eq(journeys.id, journeyPublications.journeyId))
@@ -52,7 +52,7 @@ export async function startJourneyRun(input: StartJourneyRunInput): Promise<Star
     .limit(1)
 
   if (!publication) throw new Error('Journey is not published in this environment')
-  if (publication.journeyStatus !== 'published') throw new Error('Journey is not currently active')
+  if (!publication.active) throw new Error('Journey is paused in this environment')
 
   const [startNode] = await db
     .select({ id: journeyNodes.id })
