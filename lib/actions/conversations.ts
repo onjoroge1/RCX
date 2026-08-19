@@ -6,6 +6,7 @@ import { z } from 'zod'
 
 import { getTxDb } from '@/lib/db'
 import {
+  contacts,
   conversationEvents,
   conversationMessages,
   conversations,
@@ -15,29 +16,15 @@ import { getScope, scoped } from '@/lib/db/scope'
 import { requirePermission, PERMISSIONS, ForbiddenError } from '@/lib/auth/permissions'
 import { recordAudit, type Tx } from '@/lib/audit'
 import { newId } from '@/lib/ids'
-
-/**
- * §11.2 handoff. The first real writes in the app.
- *
- * Shape every action here follows:
- *   requirePermission -> validate -> transaction -> audit -> revalidate
- *
- * Uses getTxDb() (pooled WebSocket), never `db` (neon-http): the HTTP driver has
- * no interactive transactions, so a multi-statement handoff on it would apply
- * partially with no rollback.
- */
+import { queueOutboundConversationMessage } from '@/lib/messaging/outbox'
 
 export type ActionResult = { ok: true } | { ok: false; error: string }
 
 const conversationIdSchema = z.string().min(1).max(64)
 
 /**
- * Scoped fetch + existence check, so a foreign id fails as not-found, not as a leak.
- *
- * The row lock is also the thread sequencing lock. Every conversation mutation that
- * can append a message calls this before nextSequence(), so concurrent agent replies,
- * takeovers and resume events serialize on one conversation row rather than both
- * observing the same MAX(sequence). This closes the first real write-path race.
+ * Scoped fetch + existence check. The row lock is also the thread sequencing lock:
+ * every mutation that appends a message holds it before MAX(sequence)+1.
  */
 async function loadConversation(tx: Tx, id: string) {
   const scope = await getScope()
@@ -48,6 +35,8 @@ async function loadConversation(tx: Tx, id: string) {
       automationPaused: conversations.automationPaused,
       assigneeUserId: conversations.assigneeUserId,
       contactId: conversations.contactId,
+      brandAgentId: conversations.brandAgentId,
+      channel: conversations.channel,
     })
     .from(conversations)
     .where(and(scoped(conversations, scope), eq(conversations.id, id)))
@@ -56,10 +45,6 @@ async function loadConversation(tx: Tx, id: string) {
   return { scope, conversation: row }
 }
 
-/**
- * Next sequence for a thread. Safe because loadConversation() holds FOR UPDATE on
- * the parent conversation for the lifetime of the surrounding transaction.
- */
 async function nextSequence(tx: Tx, conversationId: string) {
   const [row] = await tx
     .select({ max: sql<number>`coalesce(max(${conversationMessages.sequence}), 0)::int` })
@@ -100,7 +85,6 @@ export async function takeOverConversation(rawId: string): Promise<ActionResult>
         payload: { from: conversation.status },
       })
 
-      // §11.2: the pause must be visible in the thread, not just in the header.
       await t.insert(conversationMessages).values({
         id: newId('conversationMessage'),
         workspaceId: scope.workspaceId,
@@ -205,13 +189,13 @@ export async function sendReply(input: {
     await tx.transaction(async (t) => {
       const { scope, conversation } = await loadConversation(t, parsed.conversationId)
       if (!conversation) throw new Error('Conversation not found')
-      // Replying while automation still owns the thread would race the journey.
       if (!conversation.automationPaused && !parsed.isInternalNote) {
         throw new Error('Take over the conversation before replying.')
       }
 
+      const messageId = newId('conversationMessage')
       await t.insert(conversationMessages).values({
-        id: newId('conversationMessage'),
+        id: messageId,
         workspaceId: scope.workspaceId,
         environment: scope.environment,
         conversationId: parsed.conversationId,
@@ -222,11 +206,24 @@ export async function sendReply(input: {
         body: parsed.body,
         isInternalNote: parsed.isInternalNote,
         sequence: await nextSequence(t, parsed.conversationId),
+        channel: conversation.channel === 'mms' ? 'sms' : conversation.channel,
       })
 
-      // Internal notes are invisible to the customer, so they must not become the
-      // preview shown in the queue.
       if (!parsed.isInternalNote) {
+        const [contact] = await t
+          .select({ phoneE164: contacts.phoneE164 })
+          .from(contacts)
+          .where(and(scoped(contacts, scope), eq(contacts.id, conversation.contactId)))
+          .limit(1)
+        if (!contact) throw new Error('Conversation contact not found')
+
+        await queueOutboundConversationMessage(t, scope, {
+          conversationMessageId: messageId,
+          brandAgentId: conversation.brandAgentId,
+          recipientPhone: contact.phoneE164,
+          requestedChannel: conversation.channel === 'mms' ? 'sms' : conversation.channel,
+        })
+
         await t
           .update(conversations)
           .set({ lastMessageAt: new Date(), lastMessagePreview: parsed.body.slice(0, 140) })
@@ -234,10 +231,11 @@ export async function sendReply(input: {
       }
 
       await recordAudit(t, scope, {
-        action: parsed.isInternalNote ? 'conversation.note_added' : 'conversation.replied',
+        action: parsed.isInternalNote ? 'conversation.note_added' : 'conversation.reply_queued',
         resourceType: 'conversation',
         resourceId: parsed.conversationId,
         resourceLabel: `Conversation ${parsed.conversationId}`,
+        after: parsed.isInternalNote ? undefined : { messageId },
       })
     })
 
