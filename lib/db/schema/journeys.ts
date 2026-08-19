@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm'
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -85,10 +86,7 @@ export const journeyNodes = pgTable(
     timeoutSeconds: integer(),
     retryPolicy: jsonb(),
     messageId: text().references(() => messages.id, { onDelete: 'set null' }),
-    /**
-     * Frozen at publish time. Without this, editing a message after a journey is
-     * published silently changes production runtime behavior without a journey version.
-     */
+    /** Frozen at publish time so later message edits cannot mutate a live journey. */
     messageVersionId: text().references(() => messageVersions.id, { onDelete: 'restrict' }),
     connectionId: text(),
     goalId: text(),
@@ -117,7 +115,7 @@ export const journeyEdges = pgTable(
   (t) => [index('journey_edges_from_idx').on(t.journeyVersionId, t.fromNodeId)],
 )
 
-/** The bridge between authoring and runtime: one journey, promoted independently per environment. */
+/** Runtime promotion is independent in Test and Live. */
 export const journeyPublications = pgTable(
   'journey_publications',
   {
@@ -128,8 +126,11 @@ export const journeyPublications = pgTable(
     versionId: text()
       .notNull()
       .references(() => journeyVersions.id, { onDelete: 'restrict' }),
+    active: boolean().notNull().default(true),
     publishedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     publishedBy: text().references(() => users.id, { onDelete: 'set null' }),
+    pausedAt: timestamp({ withTimezone: true }),
+    pausedBy: text().references(() => users.id, { onDelete: 'set null' }),
   },
   (t) => [primaryKey({ columns: [t.journeyId, t.environment] })],
 )
@@ -157,7 +158,7 @@ export const journeyRuns = pgTable(
     context: jsonb().notNull().default({}),
     enteredAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     resumeAt: timestamp({ withTimezone: true }),
-    /** Worker lease. A stale lock is recoverable; the token prevents an old worker from committing after re-claim. */
+    /** Worker lease. A stale lock is recoverable; token fences an old worker after re-claim. */
     lockedAt: timestamp({ withTimezone: true }),
     lockToken: text(),
     attempts: integer().notNull().default(0),
@@ -174,7 +175,7 @@ export const journeyRuns = pgTable(
   ],
 )
 
-/** One durable execution record per visit to a node. A retry reuses the same step row and idempotency identity. */
+/** One durable execution record per visit to a node. A retry reuses the same row/effect identity. */
 export const journeyRunSteps = pgTable(
   'journey_run_steps',
   {
@@ -233,10 +234,7 @@ export const journeyRunWaits = pgTable(
   ],
 )
 
-/**
- * Idempotency ledger for side effects. A retried step reuses the same effect row
- * and idempotencyKey, so network/queue/database retries cannot create duplicates.
- */
+/** Generic idempotency ledger for runtime side effects. */
 export const journeyEffects = pgTable(
   'journey_effects',
   {
