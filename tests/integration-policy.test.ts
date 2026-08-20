@@ -131,7 +131,7 @@ test('journey input mapping is deterministic data lookup only', () => {
   assert.throws(() => resolveIntegrationInput(poisoned, subject), /Unsafe integration input key/)
 })
 
-test('journey nodes cannot inject privileged HTTP headers', () => {
+test('journey nodes and credential envelopes cannot inject privileged or framing headers', () => {
   for (const header of [
     'Authorization',
     'Cookie',
@@ -140,6 +140,14 @@ test('journey nodes cannot inject privileged HTTP headers', () => {
     'X-Forwarded-For',
     'Forwarded',
     'Connection',
+    'Transfer-Encoding',
+    'Content-Length',
+    'Content-Type',
+    'TE',
+    'Trailer',
+    'Expect',
+    'Idempotency-Key',
+    'X-RCX-Dispatch-Id',
   ]) {
     assert.throws(() => assertSafeHeaderName(header), /Unsafe integration header/)
   }
