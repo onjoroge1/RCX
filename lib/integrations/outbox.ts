@@ -20,7 +20,8 @@ export type IntegrationOutboxScope = {
 }
 
 export type QueueIntegrationInput = {
-  connectionId: string
+  connectionId?: string
+  providerKey?: string
   operation: string
   inputTemplate: unknown
   subject: unknown
@@ -29,6 +30,7 @@ export type QueueIntegrationInput = {
 export type QueuedIntegrationDispatch = {
   dispatchId: string
   effectId: string
+  connectionId: string
   status: 'pending' | 'processing' | 'retry_wait' | 'succeeded' | 'failed' | 'cancelled'
   operation: string
 }
@@ -53,6 +55,13 @@ export async function queueIntegrationDispatch(
   scope: IntegrationOutboxScope,
   input: QueueIntegrationInput,
 ): Promise<QueuedIntegrationDispatch> {
+  if (!input.connectionId && !input.providerKey) {
+    throw new IntegrationExecutionError('Integration node has no connection or provider binding', {
+      code: 'connection_not_configured',
+      retryable: false,
+    })
+  }
+
   const effect = await ensureJourneyEffect(
     tx,
     {
@@ -65,7 +74,8 @@ export async function queueIntegrationDispatch(
       effectKey: 'integration_execute',
       kind: 'integration_dispatch',
       request: {
-        connectionId: input.connectionId,
+        connectionId: input.connectionId ?? null,
+        providerKey: input.providerKey ?? null,
         operation: input.operation,
         inputTemplate: input.inputTemplate,
       },
@@ -76,6 +86,7 @@ export async function queueIntegrationDispatch(
     const [existing] = await tx
       .select({
         id: integrationDispatches.id,
+        connectionId: integrationDispatches.connectionId,
         status: integrationDispatches.status,
         operation: integrationDispatches.operation,
       })
@@ -94,7 +105,13 @@ export async function queueIntegrationDispatch(
         retryable: false,
       })
     }
-    return { dispatchId: existing.id, effectId: effect.id, status: existing.status, operation: existing.operation }
+    return {
+      dispatchId: existing.id,
+      effectId: effect.id,
+      connectionId: existing.connectionId,
+      status: existing.status,
+      operation: existing.operation,
+    }
   }
 
   if (effect.status !== 'pending') {
@@ -107,6 +124,7 @@ export async function queueIntegrationDispatch(
   const [connection] = await tx
     .select({
       id: integrationConnections.id,
+      providerKey: integrationConnections.providerKey,
       state: integrationConnections.state,
       baseUrl: integrationConnections.baseUrl,
       allowedMethods: integrationConnections.allowedMethods,
@@ -119,9 +137,10 @@ export async function queueIntegrationDispatch(
     .from(integrationConnections)
     .where(
       and(
-        eq(integrationConnections.id, input.connectionId),
         eq(integrationConnections.workspaceId, scope.workspaceId),
         eq(integrationConnections.environment, scope.environment),
+        input.connectionId ? eq(integrationConnections.id, input.connectionId) : undefined,
+        input.providerKey ? eq(integrationConnections.providerKey, input.providerKey) : undefined,
       ),
     )
     .limit(1)
@@ -133,7 +152,7 @@ export async function queueIntegrationDispatch(
       retryable: false,
     })
   }
-  if (connection.state !== 'connected') {
+  if (connection.state !== 'connected' && connection.state !== 'warning') {
     throw new IntegrationExecutionError(`Integration connection is ${connection.state}`, {
       code: 'connection_unavailable',
       retryable: false,
@@ -206,6 +225,7 @@ export async function queueIntegrationDispatch(
     .onConflictDoNothing({ target: integrationDispatches.journeyEffectId })
     .returning({
       id: integrationDispatches.id,
+      connectionId: integrationDispatches.connectionId,
       status: integrationDispatches.status,
       operation: integrationDispatches.operation,
     })
@@ -213,6 +233,7 @@ export async function queueIntegrationDispatch(
   const row = created ?? (await tx
     .select({
       id: integrationDispatches.id,
+      connectionId: integrationDispatches.connectionId,
       status: integrationDispatches.status,
       operation: integrationDispatches.operation,
     })
@@ -223,5 +244,11 @@ export async function queueIntegrationDispatch(
   if (!row) throw new Error('Integration dispatch dedupe conflict could not be resolved')
   await linkJourneyEffect(tx, effect.id, row.id)
 
-  return { dispatchId: row.id, effectId: effect.id, status: row.status, operation: row.operation }
+  return {
+    dispatchId: row.id,
+    effectId: effect.id,
+    connectionId: row.connectionId,
+    status: row.status,
+    operation: row.operation,
+  }
 }
