@@ -76,7 +76,7 @@ async function saveConnection(input: {
       .limit(1)
       .for('update')
 
-    connectionId = existing?.id ?? newId('integrationConnection')
+    connectionId = existing?.id ?? newId('connection')
     const values = {
       workspaceId: scope.workspaceId,
       environment: scope.environment,
