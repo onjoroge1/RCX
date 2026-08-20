@@ -206,6 +206,12 @@ export async function queueIntegrationDispatch(
     runId: scope.runId,
     idempotencyKey: effect.idempotencyKey,
   })
+  const frozenRequest = {
+    __rcxPreparedRequest: 1,
+    providerKey: connection.providerKey,
+    bodyEncoding: prepared.bodyEncoding,
+    body: prepared.body,
+  }
 
   const [created] = await tx
     .insert(integrationDispatches)
@@ -225,7 +231,7 @@ export async function queueIntegrationDispatch(
       method: endpoint.method,
       path: `${endpoint.url.pathname}${endpoint.url.search}`,
       bodyEncoding: prepared.bodyEncoding,
-      request: prepared.body as never,
+      request: frozenRequest as never,
       externalIdPath: binding.externalIdPath ?? null,
       status: 'pending',
       maxAttempts: binding.maxAttempts,

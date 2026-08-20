@@ -14,6 +14,13 @@ export type ControlledHttpRequest = {
   externalIdPath?: string | null
 }
 
+type PreparedRequestEnvelope = {
+  __rcxPreparedRequest: 1
+  providerKey: string
+  bodyEncoding: 'json' | 'form'
+  body: unknown
+}
+
 function responsePath(value: unknown, path: string | null | undefined): unknown {
   if (!path) return undefined
   let current: unknown = value
@@ -50,6 +57,63 @@ function parseResponseBody(buffer: Buffer, contentType: string | undefined): unk
   }
 }
 
+function preparedEnvelope(value: unknown): PreparedRequestEnvelope | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  if (row.__rcxPreparedRequest !== 1) return null
+  if (typeof row.providerKey !== 'string' || (row.bodyEncoding !== 'json' && row.bodyEncoding !== 'form')) {
+    throw new IntegrationExecutionError('Prepared integration request envelope is invalid', {
+      code: 'invalid_dispatch',
+      retryable: false,
+    })
+  }
+  return row as PreparedRequestEnvelope
+}
+
+function serializeRequestBody(
+  url: URL,
+  method: IntegrationHttpMethod,
+  inputBody: unknown,
+): { buffer: Buffer | null; contentType: string | null } {
+  if (method === 'GET') return { buffer: null, contentType: null }
+
+  const envelope = preparedEnvelope(inputBody)
+  const body = envelope ? envelope.body : inputBody
+  const encoding = envelope?.bodyEncoding ?? 'json'
+
+  if (encoding === 'form') {
+    // Form transport is not a journey-level switch. It is reserved for the
+    // first-class Stripe adapter and a fixed Stripe endpoint.
+    if (
+      envelope?.providerKey !== 'stripe' ||
+      url.origin !== 'https://api.stripe.com' ||
+      url.pathname !== '/v1/payment_links' ||
+      typeof body !== 'string'
+    ) {
+      throw new IntegrationExecutionError('Form-encoded integration requests are restricted to the Stripe payment-link adapter', {
+        code: 'invalid_dispatch',
+        retryable: false,
+      })
+    }
+    return {
+      buffer: Buffer.from(body, 'utf8'),
+      contentType: 'application/x-www-form-urlencoded',
+    }
+  }
+
+  let text: string
+  try {
+    text = JSON.stringify(body ?? null)
+  } catch (error) {
+    throw new IntegrationExecutionError('Integration request body is not JSON serializable', {
+      code: 'invalid_request_body',
+      retryable: false,
+      cause: error,
+    })
+  }
+  return { buffer: Buffer.from(text, 'utf8'), contentType: 'application/json' }
+}
+
 /**
  * Executes one controlled HTTPS request. DNS is resolved once, every resolved
  * address is checked against the SSRF policy, and the request is pinned to one
@@ -70,28 +134,16 @@ export async function executeControlledHttps(input: ControlledHttpRequest): Prom
   assertPublicResolvedAddresses(addresses.map((row) => row.address))
   const pinned = addresses[0]!
 
-  let bodyBuffer: Buffer | null = null
-  if (input.method !== 'GET') {
-    let bodyText: string
-    try {
-      bodyText = JSON.stringify(input.body ?? null)
-    } catch (error) {
-      throw new IntegrationExecutionError('Integration request body is not JSON serializable', {
-        code: 'invalid_request_body',
-        retryable: false,
-        cause: error,
-      })
-    }
-    bodyBuffer = Buffer.from(bodyText, 'utf8')
-  }
+  const serialized = serializeRequestBody(input.url, input.method, input.body)
+  const bodyBuffer = serialized.buffer
 
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'User-Agent': 'RCX-Integration-Worker/1.0',
     ...input.headers,
   }
-  if (bodyBuffer) {
-    headers['Content-Type'] = 'application/json'
+  if (bodyBuffer && serialized.contentType) {
+    headers['Content-Type'] = serialized.contentType
     headers['Content-Length'] = String(bodyBuffer.byteLength)
   }
 
