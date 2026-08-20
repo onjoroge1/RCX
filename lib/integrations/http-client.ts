@@ -2,6 +2,7 @@ import { lookup as dnsLookup } from 'node:dns/promises'
 import { request as httpsRequest } from 'node:https'
 
 import { assertPublicResolvedAddresses } from './policy'
+import { reconcileProviderStatus } from './provider-adapters'
 import { IntegrationExecutionError, type IntegrationExecutionResult, type IntegrationHttpMethod } from './runtime-types'
 
 export type ControlledHttpRequest = {
@@ -156,6 +157,8 @@ export async function executeControlledHttps(input: ControlledHttpRequest): Prom
 
   assertPublicResolvedAddresses(addresses.map((row) => row.address))
   const pinned = addresses[0]!
+  const envelope = preparedEnvelope(input.body)
+  if (envelope) assertPreparedProviderTarget(input.url, envelope)
 
   const serialized = serializeRequestBody(input.url, input.method, input.body)
   const bodyBuffer = serialized.buffer
@@ -223,6 +226,20 @@ export async function executeControlledHttps(input: ControlledHttpRequest): Prom
           const durationMs = Date.now() - startedAt
 
           if (statusCode < 200 || statusCode >= 300) {
+            const reconciled = envelope
+              ? reconcileProviderStatus(envelope.providerKey, statusCode, envelope.body)
+              : null
+            if (reconciled) {
+              settled = true
+              resolve({
+                statusCode,
+                response: reconciled.response,
+                externalId: reconciled.externalId,
+                durationMs,
+              })
+              return
+            }
+
             const classification = classifyStatus(statusCode)
             fail(
               new IntegrationExecutionError(`Integration returned HTTP ${statusCode}`, {
