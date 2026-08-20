@@ -4,7 +4,6 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/vercel-phase4-db-proof.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
