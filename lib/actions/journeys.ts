@@ -16,6 +16,8 @@ import {
 } from '@/lib/db/schema'
 import { getScope, scoped } from '@/lib/db/scope'
 import { newId } from '@/lib/ids'
+import { prepareJourneyVersionForPublication } from '@/lib/journeys/validation'
+import { cloneJourneyVersion } from '@/lib/journeys/versioning'
 
 export type JourneyActionResult =
   | { ok: true; id?: string }
@@ -145,9 +147,13 @@ export async function updateJourneyNode(input: {
       const [owned] = await t
         .select({
           nodeId: journeyNodes.id,
+          nodeKey: journeyNodes.key,
+          nodeVersionId: journeyNodes.journeyVersionId,
           journeyName: journeys.name,
+          currentVersionId: journeys.currentVersionId,
           oldName: journeyNodes.name,
           oldDescription: journeyNodes.description,
+          versionPublishedAt: journeyVersions.publishedAt,
         })
         .from(journeyNodes)
         .innerJoin(journeyVersions, eq(journeyVersions.id, journeyNodes.journeyVersionId))
@@ -163,11 +169,29 @@ export async function updateJourneyNode(input: {
         .for('update')
 
       if (!owned) throw new Error('Journey node not found.')
+      if (owned.currentVersionId !== owned.nodeVersionId) {
+        throw new Error('This journey changed since you opened it. Reload before editing.')
+      }
+
+      let targetNodeId = owned.nodeId
+      let createdDraftVersion: number | null = null
+      if (owned.versionPublishedAt) {
+        const draft = await cloneJourneyVersion(t, {
+          journeyId: parsed.journeyId,
+          sourceVersionId: owned.nodeVersionId,
+          createdBy: scope.userId,
+          notes: 'Draft created automatically on edit',
+        })
+        const clonedNodeId = draft.nodeIdByKey.get(owned.nodeKey)
+        if (!clonedNodeId) throw new Error('Cloned journey version is missing the edited node.')
+        targetNodeId = clonedNodeId
+        createdDraftVersion = draft.version
+      }
 
       await t
         .update(journeyNodes)
         .set({ name: parsed.label, description: parsed.description || null })
-        .where(eq(journeyNodes.id, parsed.nodeId))
+        .where(eq(journeyNodes.id, targetNodeId))
 
       await t
         .update(journeys)
@@ -179,12 +203,18 @@ export async function updateJourneyNode(input: {
         resourceType: 'journey',
         resourceId: parsed.journeyId,
         resourceLabel: owned.journeyName,
-        before: { nodeId: parsed.nodeId, name: owned.oldName, description: owned.oldDescription },
-        after: { nodeId: parsed.nodeId, name: parsed.label, description: parsed.description || null },
+        before: { nodeId: owned.nodeId, name: owned.oldName, description: owned.oldDescription },
+        after: {
+          nodeId: targetNodeId,
+          name: parsed.label,
+          description: parsed.description || null,
+          ...(createdDraftVersion ? { createdDraftVersion } : {}),
+        },
       })
     })
 
     revalidatePath(`/app/journeys/${parsed.journeyId}`)
+    revalidatePath('/app/journeys')
     return { ok: true, id: parsed.journeyId }
   } catch (error) {
     if (error instanceof ForbiddenError) return { ok: false, error: 'You do not have permission to edit journeys.' }
@@ -221,31 +251,80 @@ async function setJourneyRuntimeState(
 
       if (!journey) throw new Error('Journey not found.')
       if (!journey.versionId) throw new Error('Journey has no current version.')
-      if (journey.status === status) return
 
+      const [beforePublication] = await t
+        .select({
+          active: journeyPublications.active,
+          versionId: journeyPublications.versionId,
+        })
+        .from(journeyPublications)
+        .where(
+          and(
+            eq(journeyPublications.journeyId, id),
+            eq(journeyPublications.environment, scope.environment),
+          ),
+        )
+        .limit(1)
+
+      let globalStatus: 'published' | 'paused' = 'published'
       if (status === 'published') {
+        await prepareJourneyVersionForPublication(t, {
+          workspaceId: scope.workspaceId,
+          versionId: journey.versionId,
+        })
+
         await t
           .insert(journeyPublications)
           .values({
             journeyId: id,
             environment: scope.environment,
             versionId: journey.versionId,
+            active: true,
             publishedBy: scope.userId,
+            pausedAt: null,
+            pausedBy: null,
           })
           .onConflictDoUpdate({
             target: [journeyPublications.journeyId, journeyPublications.environment],
-            set: { versionId: journey.versionId, publishedAt: new Date(), publishedBy: scope.userId },
+            set: {
+              versionId: journey.versionId,
+              active: true,
+              publishedAt: new Date(),
+              publishedBy: scope.userId,
+              pausedAt: null,
+              pausedBy: null,
+            },
           })
 
         await t
           .update(journeyVersions)
           .set({ publishedAt: new Date() })
           .where(eq(journeyVersions.id, journey.versionId))
+      } else {
+        const [paused] = await t
+          .update(journeyPublications)
+          .set({ active: false, pausedAt: new Date(), pausedBy: scope.userId })
+          .where(
+            and(
+              eq(journeyPublications.journeyId, id),
+              eq(journeyPublications.environment, scope.environment),
+              eq(journeyPublications.active, true),
+            ),
+          )
+          .returning({ journeyId: journeyPublications.journeyId })
+        if (!paused) throw new Error(`Journey is not active in ${scope.environment}.`)
+
+        const [otherActive] = await t
+          .select({ journeyId: journeyPublications.journeyId })
+          .from(journeyPublications)
+          .where(and(eq(journeyPublications.journeyId, id), eq(journeyPublications.active, true)))
+          .limit(1)
+        globalStatus = otherActive ? 'published' : 'paused'
       }
 
       await t
         .update(journeys)
-        .set({ status, updatedAt: new Date() })
+        .set({ status: globalStatus, updatedAt: new Date() })
         .where(and(scoped(journeys, scope), eq(journeys.id, id)))
 
       await recordAudit(t, scope, {
@@ -253,8 +332,18 @@ async function setJourneyRuntimeState(
         resourceType: 'journey',
         resourceId: id,
         resourceLabel: journey.name,
-        before: { status: journey.status },
-        after: { status, environment: scope.environment, versionId: journey.versionId },
+        before: {
+          authoringStatus: journey.status,
+          environment: scope.environment,
+          environmentActive: beforePublication?.active ?? false,
+          environmentVersionId: beforePublication?.versionId ?? null,
+        },
+        after: {
+          authoringStatus: globalStatus,
+          environment: scope.environment,
+          environmentActive: status === 'published',
+          environmentVersionId: journey.versionId,
+        },
       })
     })
 

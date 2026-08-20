@@ -1,26 +1,31 @@
 import { postbackKey, type MessageBuilderContent } from './content-schema'
 import type { CanonicalMessage, CanonicalSuggestion, ProviderCapabilities } from './runtime-types'
 
+export type CanonicalBuilderOptions = {
+  actionPostbackData?: string[]
+  chipPostbackData?: string[]
+}
+
 /**
  * Converts the current visual-builder schema into the provider-independent runtime
- * model. The builder still has intentionally limited action metadata, so v1 treats
- * card actions and chips as deterministic postback replies rather than guessing at
- * URLs, phone numbers or calendar payloads that were never authored.
+ * model. Display labels and behavioral postback identities are deliberately
+ * separate so personalized labels cannot change journey branch semantics.
  */
 export function builderContentToCanonical(
   content: MessageBuilderContent,
   smsFallback: string | null | undefined,
+  options: CanonicalBuilderOptions = {},
 ): CanonicalMessage {
   const cardSuggestions: CanonicalSuggestion[] = content.actions.map((label, ordinal) => ({
     kind: 'reply',
     label,
-    postbackData: postbackKey(label, ordinal),
+    postbackData: options.actionPostbackData?.[ordinal] ?? postbackKey(label, ordinal),
   }))
 
   const suggestions: CanonicalSuggestion[] = content.chips.map((label, ordinal) => ({
     kind: 'reply',
     label,
-    postbackData: `chip_${postbackKey(label, ordinal)}`,
+    postbackData: options.chipPostbackData?.[ordinal] ?? `chip_${postbackKey(label, ordinal)}`,
   }))
 
   return {

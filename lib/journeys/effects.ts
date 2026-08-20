@@ -1,0 +1,100 @@
+import 'server-only'
+
+import { and, eq } from 'drizzle-orm'
+
+import type { Tx } from '@/lib/audit'
+import { journeyEffects } from '@/lib/db/schema'
+import type { Environment } from '@/lib/db/scope'
+import { newId } from '@/lib/ids'
+import { journeyEffectIdempotencyKey } from './idempotency'
+
+export type EffectScope = {
+  workspaceId: string
+  environment: Environment
+  runId: string
+  stepId: string
+}
+
+export async function ensureJourneyEffect(
+  tx: Tx,
+  scope: EffectScope,
+  input: { effectKey: string; kind: string; request?: unknown },
+): Promise<{
+  id: string
+  idempotencyKey: string
+  status: 'pending' | 'completed' | 'failed'
+  externalId: string | null
+  result: unknown
+  created: boolean
+}> {
+  const idempotencyKey = journeyEffectIdempotencyKey(scope.runId, scope.stepId, input.effectKey)
+  const effectId = newId('journeyEffect')
+  const [created] = await tx
+    .insert(journeyEffects)
+    .values({
+      id: effectId,
+      workspaceId: scope.workspaceId,
+      environment: scope.environment,
+      runId: scope.runId,
+      stepId: scope.stepId,
+      effectKey: input.effectKey,
+      kind: input.kind,
+      status: 'pending',
+      idempotencyKey,
+      request: input.request as Record<string, unknown> | undefined,
+    })
+    .onConflictDoNothing({ target: [journeyEffects.stepId, journeyEffects.effectKey] })
+    .returning({
+      id: journeyEffects.id,
+      idempotencyKey: journeyEffects.idempotencyKey,
+      status: journeyEffects.status,
+      externalId: journeyEffects.externalId,
+      result: journeyEffects.result,
+    })
+
+  if (created) return { ...created, created: true }
+
+  const [existing] = await tx
+    .select({
+      id: journeyEffects.id,
+      idempotencyKey: journeyEffects.idempotencyKey,
+      status: journeyEffects.status,
+      externalId: journeyEffects.externalId,
+      result: journeyEffects.result,
+    })
+    .from(journeyEffects)
+    .where(and(eq(journeyEffects.stepId, scope.stepId), eq(journeyEffects.effectKey, input.effectKey)))
+    .limit(1)
+  if (!existing) throw new Error('Journey effect dedupe conflict could not be resolved')
+  return { ...existing, created: false }
+}
+
+export async function completeJourneyEffect(
+  tx: Tx,
+  effectId: string,
+  input: { externalId?: string | null; result?: unknown },
+): Promise<void> {
+  await tx
+    .update(journeyEffects)
+    .set({
+      status: 'completed',
+      externalId: input.externalId ?? null,
+      result: input.result as Record<string, unknown> | undefined,
+      error: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(journeyEffects.id, effectId))
+}
+
+export async function failJourneyEffect(tx: Tx, effectId: string, error: unknown): Promise<void> {
+  await tx
+    .update(journeyEffects)
+    .set({
+      status: 'failed',
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+      },
+      updatedAt: new Date(),
+    })
+    .where(eq(journeyEffects.id, effectId))
+}

@@ -27,11 +27,6 @@ const bytea = customType<{ data: Buffer; notNull: false }>({
   dataType: () => 'bytea',
 })
 
-/**
- * §19.2's "display the secret once, then mask" is satisfied structurally: the server
- * action returns the plaintext once and persists only the hash. There is no code path
- * that can re-reveal it.
- */
 export const apiKeys = pgTable(
   'api_keys',
   {
@@ -80,7 +75,6 @@ export const webhookEndpoints = pgTable(
   (t) => [index('webhook_endpoints_workspace_idx').on(t.workspaceId, t.environment)],
 )
 
-/** One row per pattern, so the UI round-trips and dispatch matches by glob. */
 export const webhookEndpointEvents = pgTable(
   'webhook_endpoint_events',
   {
@@ -92,10 +86,6 @@ export const webhookEndpointEvents = pgTable(
   (t) => [uniqueIndex('webhook_endpoint_events_unique').on(t.endpointId, t.eventPattern)],
 )
 
-/**
- * An outbox. Without one, webhook dispatch, the audit log and the attention feed
- * each get built a different way, and the three then disagree about what happened.
- */
 export const platformEvents = pgTable(
   'platform_events',
   {
@@ -110,7 +100,10 @@ export const platformEvents = pgTable(
     payload: jsonb(),
     occurredAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('platform_events_dispatch_idx').on(t.workspaceId, t.environment, t.occurredAt.desc())],
+  (t) => [
+    index('platform_events_dispatch_idx').on(t.workspaceId, t.environment, t.occurredAt.desc()),
+    index('platform_events_key_idx').on(t.workspaceId, t.environment, t.key, t.occurredAt),
+  ],
 )
 
 export const webhookDeliveries = pgTable(
@@ -143,7 +136,6 @@ export const webhookDeliveries = pgTable(
   ],
 )
 
-/** §19.4's expandable row lists exactly these fields. PII redaction happens on write. */
 export const apiRequestLogs = pgTable(
   'api_request_logs',
   {
@@ -177,7 +169,6 @@ export const apiRequestLogs = pgTable(
   ],
 )
 
-/** Adapter selection is data, not a constant. */
 export const providerAccounts = pgTable(
   'provider_accounts',
   {
