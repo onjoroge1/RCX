@@ -55,9 +55,9 @@ function parseResponseBody(buffer: Buffer, contentType: string | undefined): unk
  * validated address via a custom lookup callback. Redirects are never followed.
  */
 export async function executeControlledHttps(input: ControlledHttpRequest): Promise<IntegrationExecutionResult> {
-  let resolved: Awaited<ReturnType<typeof dnsLookup>>
+  let addresses: Array<{ address: string; family: number }>
   try {
-    resolved = await dnsLookup(input.url.hostname, { all: true, verbatim: true })
+    addresses = await dnsLookup(input.url.hostname, { all: true, verbatim: true })
   } catch (error) {
     throw new IntegrationExecutionError('Integration DNS lookup failed', {
       code: 'dns_failure',
@@ -66,7 +66,6 @@ export async function executeControlledHttps(input: ControlledHttpRequest): Prom
     })
   }
 
-  const addresses = Array.isArray(resolved) ? resolved : [resolved]
   assertPublicResolvedAddresses(addresses.map((row) => row.address))
   const pinned = addresses[0]!
 
@@ -145,7 +144,13 @@ export async function executeControlledHttps(input: ControlledHttpRequest): Prom
         res.on('end', () => {
           if (settled) return
           const statusCode = res.statusCode ?? 0
-          const response = parseResponseBody(Buffer.concat(chunks), res.headers['content-type'])
+          let response: unknown
+          try {
+            response = parseResponseBody(Buffer.concat(chunks), res.headers['content-type'])
+          } catch (error) {
+            fail(error)
+            return
+          }
           const durationMs = Date.now() - startedAt
 
           if (statusCode < 200 || statusCode >= 300) {
