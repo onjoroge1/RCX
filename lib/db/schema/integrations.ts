@@ -159,6 +159,7 @@ export const integrationDispatches = pgTable(
     nodeId: text().notNull(),
     idempotencyKey: text().notNull(),
     operation: text().notNull(),
+    baseUrlSnapshot: text().notNull(),
     method: text().notNull(),
     path: text().notNull(),
     request: jsonb(),
