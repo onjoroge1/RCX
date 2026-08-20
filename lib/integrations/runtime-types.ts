@@ -14,7 +14,8 @@ export const operationBindingsSchema = z.record(z.string().min(1).max(120), oper
 export type OperationBinding = z.infer<typeof operationBindingSchema>
 
 export const integrationNodeConfigSchema = z.object({
-  connectionId: z.string().min(1).max(80),
+  /** Optional because journey_nodes.connection_id is the preferred persisted reference. */
+  connectionId: z.string().min(1).max(80).optional(),
   /** Required for generic http_request. Semantic nodes use their node type as the operation key. */
   operation: z.string().min(1).max(120).optional(),
   input: z.unknown().optional(),
