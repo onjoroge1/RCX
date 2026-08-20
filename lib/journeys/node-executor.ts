@@ -80,7 +80,6 @@ export type RuntimeNode = {
   timeoutSeconds: number | null
   messageId: string | null
   messageVersionId: string | null
-  connectionId: string | null
   goalId: string | null
 }
 
@@ -415,8 +414,9 @@ async function integrationNode(
   if (existing) return existing
 
   const config = integrationNodeConfigSchema.parse(node.config ?? {})
-  const connectionId = node.connectionId ?? config.connectionId
-  if (!connectionId) throw new Error(`Integration node ${node.key} has no connection selected`)
+  if (!config.connectionId && !config.providerKey) {
+    throw new Error(`Integration node ${node.key} has no provider or connection binding`)
+  }
 
   const operation = node.type === 'http_request' ? config.operation : node.type
   if (!operation) throw new Error(`Integration node ${node.key} has no configured operation`)
@@ -431,7 +431,8 @@ async function integrationNode(
       nodeId: node.id,
     },
     {
-      connectionId,
+      connectionId: config.connectionId,
+      providerKey: config.providerKey,
       operation,
       inputTemplate: config.input,
       subject: runtimeSubject(run),
@@ -449,7 +450,7 @@ async function integrationNode(
   return {
     kind: 'waiting',
     wait,
-    output: { dispatchId: queued.dispatchId, operation, connectionId },
+    output: { dispatchId: queued.dispatchId, operation, connectionId: queued.connectionId },
   }
 }
 
