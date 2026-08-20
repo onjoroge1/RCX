@@ -159,9 +159,13 @@ export const integrationDispatches = pgTable(
     nodeId: text().notNull(),
     idempotencyKey: text().notNull(),
     operation: text().notNull(),
+    /** Provider identity frozen when the request is prepared for durable retry. */
+    providerKeySnapshot: text().notNull(),
     baseUrlSnapshot: text().notNull(),
     method: text().notNull(),
     path: text().notNull(),
+    /** Provider-selected wire encoding. Journey input cannot set this field. */
+    bodyEncoding: text().notNull().default('json'),
     request: jsonb(),
     externalIdPath: text(),
     status: integrationDispatchStatusEnum().notNull().default('pending'),
