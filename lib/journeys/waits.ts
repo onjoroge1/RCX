@@ -229,6 +229,13 @@ async function resolveEventWaits(): Promise<number> {
   const txDb = getTxDb()
   for (const wait of waits) {
     if (!wait.eventKey) continue
+    const match = (wait.match ?? {}) as Record<string, string | number | boolean | null>
+    const resourceIdMatch = typeof match.resourceId === 'string' ? match.resourceId : null
+    const resourceTypeMatch = typeof match.resourceType === 'string' ? match.resourceType : null
+
+    // Push top-level resource selectors into SQL before the bounded scan. Without
+    // this, a high-volume event key could permanently starve an exact dispatch or
+    // conversation wait behind the same first 50 unrelated events on every poll.
     const events = await db
       .select({
         id: platformEvents.id,
@@ -244,6 +251,8 @@ async function resolveEventWaits(): Promise<number> {
           eq(platformEvents.workspaceId, wait.workspaceId),
           eq(platformEvents.environment, wait.environment),
           eq(platformEvents.key, wait.eventKey),
+          resourceIdMatch ? eq(platformEvents.resourceId, resourceIdMatch) : undefined,
+          resourceTypeMatch ? eq(platformEvents.resourceType, resourceTypeMatch) : undefined,
           gte(platformEvents.occurredAt, wait.listenAfter),
           wait.timeoutAt ? lte(platformEvents.occurredAt, wait.timeoutAt) : undefined,
         ),
@@ -251,7 +260,6 @@ async function resolveEventWaits(): Promise<number> {
       .orderBy(asc(platformEvents.occurredAt))
       .limit(50)
 
-    const match = (wait.match ?? {}) as Record<string, string | number | boolean | null>
     const event = events.find((candidate) => matchesFlatPaths(eventSubject(candidate), match))
     if (!event) continue
 
