@@ -60,6 +60,11 @@ function mergeNodeOutput(
   }
 }
 
+function nodeErrorIsRetryable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return true
+  return (error as { retryable?: unknown }).retryable !== false
+}
+
 async function recoverStaleJourneyLocks(now = new Date()): Promise<number> {
   const staleBefore = new Date(now.getTime() - STALE_LOCK_MS)
   const recovered = await getTxDb()
@@ -335,7 +340,7 @@ async function processClaimedStep(claim: ClaimedRun): Promise<'active' | 'waitin
       outcome = await executeJourneyNode(tx, run, node, step)
     } catch (error) {
       const policy = retryPolicySchema.parse(nodeRow.retryPolicy ?? {})
-      if (step.attempts < policy.maxAttempts) {
+      if (nodeErrorIsRetryable(error) && step.attempts < policy.maxAttempts) {
         const retryAt = new Date(Date.now() + retryDelayMs(step.attempts, policy))
         await tx
           .update(journeyRunSteps)
