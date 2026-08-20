@@ -18,6 +18,7 @@ CREATE TABLE "integration_dispatches" (
   "node_id" text NOT NULL,
   "idempotency_key" text NOT NULL,
   "operation" text NOT NULL,
+  "base_url_snapshot" text NOT NULL,
   "method" text NOT NULL,
   "path" text NOT NULL,
   "request" jsonb,
