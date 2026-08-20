@@ -8,6 +8,11 @@ import {
   integrationConnections,
   integrationDispatches,
   integrationEvents,
+  journeyEdges,
+  journeyNodes,
+  journeyRuns,
+  journeyRunSteps,
+  journeyRunWaits,
   platformEvents,
 } from '@/lib/db/schema'
 import { newId } from '@/lib/ids'
@@ -63,6 +68,27 @@ function serializeError(error: unknown): Record<string, unknown> {
 
 function retryDelayMs(attempt: number): number {
   return Math.min(15_000 * 2 ** Math.max(0, attempt - 1), 15 * 60_000)
+}
+
+function mergeFailureContext(
+  rawContext: unknown,
+  nodeKey: string,
+  dispatchId: string,
+  error: Record<string, unknown>,
+): Record<string, unknown> {
+  const context = rawContext && typeof rawContext === 'object' && !Array.isArray(rawContext)
+    ? { ...(rawContext as Record<string, unknown>) }
+    : {}
+  const nodes = context.nodes && typeof context.nodes === 'object' && !Array.isArray(context.nodes)
+    ? { ...(context.nodes as Record<string, unknown>) }
+    : {}
+  return {
+    ...context,
+    nodes: {
+      ...nodes,
+      [nodeKey]: { dispatchId, error },
+    },
+  }
 }
 
 async function recoverStaleLocks(now = new Date()): Promise<number> {
@@ -172,7 +198,18 @@ async function loadExecutionConnection(dispatch: ClaimedDispatch) {
       retryable: false,
     })
   }
-  if (new URL(connection.baseUrl).origin !== dispatch.baseUrlSnapshot) {
+
+  let origin: string
+  try {
+    origin = new URL(connection.baseUrl).origin
+  } catch (error) {
+    throw new IntegrationExecutionError('Integration connection base URL is invalid', {
+      code: 'invalid_connection_policy',
+      retryable: false,
+      cause: error,
+    })
+  }
+  if (origin !== dispatch.baseUrlSnapshot) {
     throw new IntegrationExecutionError('Connection destination changed after this integration dispatch was queued', {
       code: 'connection_policy_changed',
       retryable: false,
@@ -418,8 +455,10 @@ async function recordFailure(dispatch: ClaimedDispatch, error: unknown): Promise
       error: serialized,
       occurredAt: now,
     })
+
+    const failureEventId = newId('platformEvent')
     await tx.insert(platformEvents).values({
-      id: newId('platformEvent'),
+      id: failureEventId,
       workspaceId: dispatch.workspaceId,
       environment: dispatch.environment,
       key: 'integration.execution_failed',
@@ -433,6 +472,77 @@ async function recordFailure(dispatch: ClaimedDispatch, error: unknown): Promise
       },
       occurredAt: now,
     })
+
+    const [node] = await tx
+      .select({ key: journeyNodes.key })
+      .from(journeyNodes)
+      .where(eq(journeyNodes.id, dispatch.nodeId))
+      .limit(1)
+    const [errorEdge] = await tx
+      .select({ toNodeId: journeyEdges.toNodeId })
+      .from(journeyEdges)
+      .where(and(eq(journeyEdges.fromNodeId, dispatch.nodeId), eq(journeyEdges.kind, 'error')))
+      .orderBy(asc(journeyEdges.ordinal))
+      .limit(1)
+    const [run] = await tx
+      .select({ context: journeyRuns.context })
+      .from(journeyRuns)
+      .where(eq(journeyRuns.id, dispatch.runId))
+      .limit(1)
+
+    await tx
+      .update(journeyRunWaits)
+      .set({
+        status: 'resolved',
+        resolutionEventId: failureEventId,
+        resolution: {
+          reason: 'integration_failed',
+          eventId: failureEventId,
+          dispatchId: dispatch.id,
+          operation: dispatch.operation,
+          error: serialized,
+        },
+        resolvedAt: now,
+      })
+      .where(and(eq(journeyRunWaits.stepId, dispatch.stepId), eq(journeyRunWaits.status, 'pending')))
+
+    await tx
+      .update(journeyRunSteps)
+      .set({
+        status: 'failed',
+        finishedAt: now,
+        error: { code: 'integration_failed', dispatchId: dispatch.id, detail: serialized },
+      })
+      .where(eq(journeyRunSteps.id, dispatch.stepId))
+
+    const context = mergeFailureContext(run?.context, node?.key ?? 'integration', dispatch.id, serialized)
+    if (errorEdge) {
+      await tx
+        .update(journeyRuns)
+        .set({
+          status: 'active',
+          currentNodeId: errorEdge.toNodeId,
+          context,
+          resumeAt: null,
+          lockedAt: null,
+          lockToken: null,
+        })
+        .where(and(eq(journeyRuns.id, dispatch.runId), eq(journeyRuns.status, 'waiting')))
+    } else {
+      await tx
+        .update(journeyRuns)
+        .set({
+          status: 'failed',
+          context,
+          failedAt: now,
+          failureReason: `Integration ${dispatch.operation} failed with no error edge`,
+          resumeAt: null,
+          lockedAt: null,
+          lockToken: null,
+        })
+        .where(and(eq(journeyRuns.id, dispatch.runId), eq(journeyRuns.status, 'waiting')))
+    }
+
     await tx
       .update(integrationConnections)
       .set({
