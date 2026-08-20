@@ -19,6 +19,11 @@ export type PreparedProviderRequest = {
   bodyEncoding: IntegrationBodyEncoding
 }
 
+export type ProviderStatusReconciliation = {
+  response: unknown
+  externalId: string
+} | null
+
 const stripeMetadataSchema = z
   .record(z.string().min(1).max(40), z.string().max(500))
   .refine((value) => Object.keys(value).length <= 45, 'Stripe metadata supports at most 45 RCX-supplied entries')
@@ -142,6 +147,32 @@ function googleCalendarBooking(input: unknown, context: ProviderAdapterContext):
       },
     },
     bodyEncoding: 'json',
+  }
+}
+
+/**
+ * Google documents 409 "identifier already exists" for a caller-supplied event ID.
+ * RCX deliberately derives that ID from one logical journey effect, so a 409 on
+ * this single-event create means a previous attempt already committed the same
+ * logical booking after RCX lost its response. Reconcile it as success instead of
+ * creating a second event or failing the journey.
+ */
+export function reconcileProviderStatus(
+  providerKey: string,
+  statusCode: number,
+  preparedBody: unknown,
+): ProviderStatusReconciliation {
+  if (providerKey !== 'google-calendar' || statusCode !== 409) return null
+  if (!preparedBody || typeof preparedBody !== 'object' || Array.isArray(preparedBody)) return null
+  const id = (preparedBody as Record<string, unknown>).id
+  if (typeof id !== 'string' || !/^[0-9a-v]{5,1024}$/.test(id)) return null
+  return {
+    externalId: id,
+    response: {
+      id,
+      duplicate: true,
+      providerStatusCode: 409,
+    },
   }
 }
 
