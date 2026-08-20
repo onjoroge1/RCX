@@ -29,6 +29,7 @@ function classifyStatus(statusCode: number): { retryable: boolean; code: string 
   if (statusCode === 425) return { retryable: true, code: 'http_425' }
   if (statusCode === 429) return { retryable: true, code: 'http_429' }
   if (statusCode >= 500) return { retryable: true, code: 'http_5xx' }
+  if (statusCode === 401 || statusCode === 403) return { retryable: false, code: 'auth_rejected' }
   if (statusCode >= 300 && statusCode < 400) return { retryable: false, code: 'redirect_blocked' }
   return { retryable: false, code: 'http_4xx' }
 }
@@ -144,15 +145,11 @@ export async function executeControlledHttps(input: ControlledHttpRequest): Prom
         res.on('end', () => {
           if (settled) return
           const statusCode = res.statusCode ?? 0
-          let response: unknown
-          try {
-            response = parseResponseBody(Buffer.concat(chunks), res.headers['content-type'])
-          } catch (error) {
-            fail(error)
-            return
-          }
           const durationMs = Date.now() - startedAt
 
+          // Retry/terminal semantics are determined by the HTTP status, not by
+          // whether an error body happened to be valid JSON. A malformed 500 must
+          // still retry; a redirect must still remain blocked.
           if (statusCode < 200 || statusCode >= 300) {
             const classification = classifyStatus(statusCode)
             fail(
@@ -162,6 +159,14 @@ export async function executeControlledHttps(input: ControlledHttpRequest): Prom
                 statusCode,
               }),
             )
+            return
+          }
+
+          let response: unknown
+          try {
+            response = parseResponseBody(Buffer.concat(chunks), res.headers['content-type'])
+          } catch (error) {
+            fail(error)
             return
           }
 
