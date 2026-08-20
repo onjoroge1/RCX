@@ -70,6 +70,35 @@ function preparedEnvelope(value: unknown): PreparedRequestEnvelope | null {
   return row as PreparedRequestEnvelope
 }
 
+function assertPreparedProviderTarget(url: URL, envelope: PreparedRequestEnvelope): void {
+  if (envelope.providerKey === 'stripe') {
+    if (
+      envelope.bodyEncoding !== 'form' ||
+      url.origin !== 'https://api.stripe.com' ||
+      url.pathname !== '/v1/payment_links'
+    ) {
+      throw new IntegrationExecutionError('Prepared Stripe requests are restricted to the Stripe Payment Links API', {
+        code: 'provider_target_mismatch',
+        retryable: false,
+      })
+    }
+    return
+  }
+
+  if (envelope.providerKey === 'google-calendar') {
+    if (
+      envelope.bodyEncoding !== 'json' ||
+      url.origin !== 'https://www.googleapis.com' ||
+      !/^\/calendar\/v3\/calendars\/[^/]+\/events$/.test(url.pathname)
+    ) {
+      throw new IntegrationExecutionError('Prepared Google Calendar requests are restricted to the Calendar Events API', {
+        code: 'provider_target_mismatch',
+        retryable: false,
+      })
+    }
+  }
+}
+
 function serializeRequestBody(
   url: URL,
   method: IntegrationHttpMethod,
@@ -78,19 +107,13 @@ function serializeRequestBody(
   if (method === 'GET') return { buffer: null, contentType: null }
 
   const envelope = preparedEnvelope(inputBody)
+  if (envelope) assertPreparedProviderTarget(url, envelope)
   const body = envelope ? envelope.body : inputBody
   const encoding = envelope?.bodyEncoding ?? 'json'
 
   if (encoding === 'form') {
-    // Form transport is not a journey-level switch. It is reserved for the
-    // first-class Stripe adapter and a fixed Stripe endpoint.
-    if (
-      envelope?.providerKey !== 'stripe' ||
-      url.origin !== 'https://api.stripe.com' ||
-      url.pathname !== '/v1/payment_links' ||
-      typeof body !== 'string'
-    ) {
-      throw new IntegrationExecutionError('Form-encoded integration requests are restricted to the Stripe payment-link adapter', {
+    if (typeof body !== 'string') {
+      throw new IntegrationExecutionError('Prepared form request body must be a string', {
         code: 'invalid_dispatch',
         retryable: false,
       })
@@ -199,9 +222,6 @@ export async function executeControlledHttps(input: ControlledHttpRequest): Prom
           const statusCode = res.statusCode ?? 0
           const durationMs = Date.now() - startedAt
 
-          // Retry/terminal semantics are determined by the HTTP status, not by
-          // whether an error body happened to be valid JSON. A malformed 500 must
-          // still retry; a redirect must still remain blocked.
           if (statusCode < 200 || statusCode >= 300) {
             const classification = classifyStatus(statusCode)
             fail(
