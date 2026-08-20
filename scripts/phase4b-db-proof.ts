@@ -177,12 +177,19 @@ async function main() {
   console.log('[phase4b-db-proof] ALL PROVIDER ADAPTER DB PROOFS PASSED')
 }
 
-try {
-  await main()
-} finally {
-  await sql`DELETE FROM integration_dispatches WHERE workspace_id = ${workspaceId}`
-  await sql`DELETE FROM integration_connections WHERE workspace_id = ${workspaceId}`
-  await sql`DELETE FROM workspaces WHERE id = ${workspaceId}`
-  await sql`DELETE FROM organizations WHERE id = ${orgId}`
-  console.log('  CLEAN disposable Phase 4B rows removed')
+async function runProof() {
+  try {
+    await main()
+  } finally {
+    await sql`DELETE FROM integration_dispatches WHERE workspace_id = ${workspaceId}`
+    await sql`DELETE FROM integration_connections WHERE workspace_id = ${workspaceId}`
+    await sql`DELETE FROM workspaces WHERE id = ${workspaceId}`
+    await sql`DELETE FROM organizations WHERE id = ${orgId}`
+    console.log('  CLEAN disposable Phase 4B rows removed')
+  }
 }
+
+runProof().catch((error) => {
+  console.error(error)
+  process.exitCode = 1
+})
