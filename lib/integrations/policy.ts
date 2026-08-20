@@ -38,7 +38,7 @@ function inV4Cidr(value: number, base: number, prefix: number): boolean {
   return (value & mask) === (base & mask)
 }
 
-function expandIpv6(address: string): bigint | null {
+function ipv6Bytes(address: string): Uint8Array | null {
   if (isIP(address) !== 6) return null
   let input = address.toLowerCase()
   const zoneIndex = input.indexOf('%')
@@ -59,28 +59,35 @@ function expandIpv6(address: string): bigint | null {
   const right = halves.length === 2 && halves[1] ? halves[1]!.split(':').filter(Boolean) : []
   const missing = 8 - left.length - right.length
   if (missing < 0 || (halves.length === 1 && missing !== 0)) return null
-  const groups = [...left, ...Array(missing).fill('0'), ...right]
+  const groups = [...left, ...Array<string>(missing).fill('0'), ...right]
   if (groups.length !== 8) return null
 
-  let result = 0n
-  for (const group of groups) {
+  const bytes = new Uint8Array(16)
+  for (let index = 0; index < groups.length; index += 1) {
+    const group = groups[index]!
     if (!/^[0-9a-f]{1,4}$/.test(group)) return null
-    result = (result << 16n) | BigInt(parseInt(group, 16))
+    const value = parseInt(group, 16)
+    bytes[index * 2] = (value >>> 8) & 0xff
+    bytes[index * 2 + 1] = value & 0xff
   }
-  return result
+  return bytes
 }
 
-function inV6Cidr(value: bigint, base: bigint, prefix: number): boolean {
-  if (prefix === 0) return true
-  const bits = 128n
-  const shift = bits - BigInt(prefix)
-  return (value >> shift) === (base >> shift)
+function inV6Cidr(value: Uint8Array, base: Uint8Array, prefix: number): boolean {
+  const wholeBytes = Math.floor(prefix / 8)
+  const remainingBits = prefix % 8
+  for (let i = 0; i < wholeBytes; i += 1) {
+    if (value[i] !== base[i]) return false
+  }
+  if (remainingBits === 0) return true
+  const mask = (0xff << (8 - remainingBits)) & 0xff
+  return ((value[wholeBytes] ?? 0) & mask) === ((base[wholeBytes] ?? 0) & mask)
 }
 
-function v6(hex: string): bigint {
-  const value = expandIpv6(hex)
-  if (value == null) throw new Error(`Invalid static IPv6 CIDR base: ${hex}`)
-  return value
+function v6(address: string): Uint8Array {
+  const bytes = ipv6Bytes(address)
+  if (!bytes) throw new Error(`Invalid static IPv6 CIDR base: ${address}`)
+  return bytes
 }
 
 /**
@@ -110,22 +117,22 @@ export function isPublicIp(address: string): boolean {
     return !blocked.some(([base, prefix]) => inV4Cidr(v4, base, prefix))
   }
 
-  const v6Value = expandIpv6(address)
-  if (v6Value == null) return false
-  const blocked6: Array<[bigint, number]> = [
-    [0n, 128], // ::
-    [1n, 128], // ::1
+  const value = ipv6Bytes(address)
+  if (!value) return false
+  const blocked6: Array<[Uint8Array, number]> = [
+    [v6('::'), 128],
+    [v6('::1'), 128],
     [v6('fc00::'), 7],
     [v6('fe80::'), 10],
     [v6('ff00::'), 8],
     [v6('2001:db8::'), 32],
   ]
-  if (blocked6.some(([base, prefix]) => inV6Cidr(v6Value, base, prefix))) return false
+  if (blocked6.some(([base, prefix]) => inV6Cidr(value, base, prefix))) return false
 
-  // IPv4-mapped IPv6 ::ffff:0:0/96 must inherit the IPv4 policy.
-  if (inV6Cidr(v6Value, v6('::ffff:0:0'), 96)) {
-    const mapped = Number(v6Value & 0xffffffffn) >>> 0
-    const dotted = `${(mapped >>> 24) & 255}.${(mapped >>> 16) & 255}.${(mapped >>> 8) & 255}.${mapped & 255}`
+  // IPv4-mapped IPv6 ::ffff:0:0/96 inherits the IPv4 policy.
+  const mappedBase = v6('::ffff:0:0')
+  if (inV6Cidr(value, mappedBase, 96)) {
+    const dotted = `${value[12]}.${value[13]}.${value[14]}.${value[15]}`
     return isPublicIp(dotted)
   }
   return true
