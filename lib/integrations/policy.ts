@@ -15,6 +15,13 @@ const FORBIDDEN_NODE_HEADERS = new Set([
   'connection',
   'upgrade',
   'transfer-encoding',
+  'content-length',
+  'content-type',
+  'te',
+  'trailer',
+  'expect',
+  'idempotency-key',
+  'x-rcx-dispatch-id',
 ])
 
 export function assertSafeHeaderName(name: string): void {
