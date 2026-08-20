@@ -241,6 +241,14 @@ export const integrationCategoryEnum = pgEnum('integration_category', [
 export const connectionStateEnum = pgEnum('connection_state', ['connected', 'warning', 'error', 'disconnected'])
 export const mappingDirectionEnum = pgEnum('mapping_direction', ['inbound', 'outbound'])
 export const eventStatusEnum = pgEnum('event_status', ['succeeded', 'failed', 'retrying', 'pending'])
+export const integrationDispatchStatusEnum = pgEnum('integration_dispatch_status', [
+  'pending',
+  'processing',
+  'retry_wait',
+  'succeeded',
+  'failed',
+  'cancelled',
+])
 
 /* ---------- developer ---------- */
 export const apiKeyStatusEnum = pgEnum('api_key_status', ['active', 'revoked', 'expired'])
