@@ -34,7 +34,7 @@ export type WorkerDrainResult = {
 const ZERO_PROVIDER_EVENTS: ProviderEventWorkerResult = { claimed: 0, processed: 0, failed: 0 }
 const ZERO_JOURNEYS: JourneyWorkerResult = {
   recovered: 0,
-  wake: { timers: 0, events: 0, failures: 0 },
+  wake: { messageFailures: 0, timers: 0, events: 0, timeouts: 0, retries: 0 },
   claimedRuns: 0,
   steps: 0,
   completed: 0,
@@ -69,9 +69,11 @@ function addJourneys(a: JourneyWorkerResult, b: JourneyWorkerResult): JourneyWor
   return {
     recovered: a.recovered + b.recovered,
     wake: {
+      messageFailures: a.wake.messageFailures + b.wake.messageFailures,
       timers: a.wake.timers + b.wake.timers,
       events: a.wake.events + b.wake.events,
-      failures: a.wake.failures + b.wake.failures,
+      timeouts: a.wake.timeouts + b.wake.timeouts,
+      retries: a.wake.retries + b.wake.retries,
     },
     claimedRuns: a.claimedRuns + b.claimedRuns,
     steps: a.steps + b.steps,
@@ -151,8 +153,7 @@ export async function drainWorkerPipelines(options: WorkerDrainOptions = {}): Pr
     if (lastPassClaimed === 0) break
   }
 
-  const claimed =
-    providerEvents.claimed + journeys.claimedRuns + integrations.claimed + messaging.claimed
+  const claimed = providerEvents.claimed + journeys.claimedRuns + integrations.claimed + messaging.claimed
 
   return {
     passes,
