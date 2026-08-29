@@ -8,8 +8,14 @@ import { users, workspaces } from '@/lib/db/schema'
 import { getScope, listMyWorkspaces } from '@/lib/db/scope'
 
 export const metadata: Metadata = {
-  title: 'Workspace — RCX',
+  title: 'Workspace',
   description: 'The RCX operating workspace for business RCS.',
+  robots: {
+    index: false,
+    follow: false,
+    noarchive: true,
+    nocache: true,
+  },
 }
 
 /**
