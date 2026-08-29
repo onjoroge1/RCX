@@ -1,4 +1,12 @@
 import { GenericMarketingPage } from '@/components/marketing/generic-page'
+import { marketingMetadata } from '@/lib/seo'
+
+export const metadata = marketingMetadata({
+  title: 'RCS journey automation',
+  description:
+    'Automate event-driven RCS customer journeys with branching, waits, integrations, human handoff, goals, and SMS fallback in RCX.',
+  path: '/product/journeys',
+})
 
 export default function Page() {
   return (
