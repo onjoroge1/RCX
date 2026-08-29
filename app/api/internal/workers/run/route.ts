@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 
 import { workerRequestAuthorized } from '@/lib/workers/auth'
 import { drainWorkerPipelines } from '@/lib/workers/orchestrator'
+import { RECOVERY_WORKER_DRAIN } from '@/lib/workers/policy'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,6 +13,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const result = await drainWorkerPipelines({ batchSize: 12, maxPasses: 6, timeBudgetMs: 240_000 })
+  const result = await drainWorkerPipelines(RECOVERY_WORKER_DRAIN)
   return NextResponse.json({ ok: true, drain: result })
 }
