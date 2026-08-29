@@ -5,6 +5,7 @@ import { processJourneyBatch, type JourneyWorkerResult } from '@/lib/journeys/wo
 import { processProviderEventBatch } from '@/lib/messaging/event-worker'
 import { recoverStaleMessagingLocks } from '@/lib/messaging/recovery'
 import { processDispatchBatch, type MessagingWorkerResult } from '@/lib/messaging/worker'
+import { normalizeWorkerDrainOptions } from './policy'
 
 export type ProviderEventWorkerResult = {
   claimed: number
@@ -54,11 +55,6 @@ const ZERO_MESSAGING: MessagingWorkerResult = {
   retried: 0,
   failed: 0,
   fallback: 0,
-}
-
-function boundedInt(value: number | undefined, fallback: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return fallback
-  return Math.max(min, Math.min(max, Math.trunc(value!)))
 }
 
 function addProviderEvents(a: ProviderEventWorkerResult, b: ProviderEventWorkerResult): ProviderEventWorkerResult {
@@ -113,9 +109,7 @@ function addMessaging(a: MessagingWorkerResult, b: MessagingWorkerResult): Messa
  * claimable work rather than duplicating side effects.
  */
 export async function drainWorkerPipelines(options: WorkerDrainOptions = {}): Promise<WorkerDrainResult> {
-  const batchSize = boundedInt(options.batchSize, 8, 1, 25)
-  const maxPasses = boundedInt(options.maxPasses, 3, 1, 8)
-  const timeBudgetMs = boundedInt(options.timeBudgetMs, 45_000, 5_000, 240_000)
+  const { batchSize, maxPasses, timeBudgetMs } = normalizeWorkerDrainOptions(options)
   const started = Date.now()
 
   const recoveredMessagingLocks = await recoverStaleMessagingLocks()
