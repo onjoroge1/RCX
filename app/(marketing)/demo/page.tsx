@@ -1,13 +1,15 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Label, Field, Textarea } from '@/components/ui/input'
+import { marketingMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
-  title: 'Talk to a specialist — RCX',
-  description: 'Book a walkthrough of the RCX operating platform for business RCS.',
-}
+export const metadata = marketingMetadata({
+  title: 'RCX demo and walkthrough',
+  description:
+    'See how RCX handles branded RCS messages, customer journeys, two-way conversations, integrations, analytics, and SMS fallback on your use case.',
+  path: '/demo',
+})
 
 export default function Page() {
   return (
