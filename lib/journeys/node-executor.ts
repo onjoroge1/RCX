@@ -16,6 +16,8 @@ import {
 } from '@/lib/db/schema'
 import type { Environment } from '@/lib/db/scope'
 import { newId } from '@/lib/ids'
+import { queueIntegrationDispatch } from '@/lib/integrations/outbox'
+import { integrationNodeConfigSchema } from '@/lib/integrations/runtime-types'
 import { queueOutboundConversationMessage } from '@/lib/messaging/outbox'
 import { resolvePersonalizationContext } from '@/lib/messaging/personalization-context'
 import { resolveMessageSnapshot } from '@/lib/messaging/personalization'
@@ -402,6 +404,56 @@ async function waitNode(tx: Tx, run: RuntimeRun, node: RuntimeNode, step: Runtim
   return { kind: 'waiting', wait }
 }
 
+async function integrationNode(
+  tx: Tx,
+  run: RuntimeRun,
+  node: RuntimeNode,
+  step: RuntimeStep,
+): Promise<NodeExecutionOutcome> {
+  const existing = await resolvedWaitOutcome(tx, step)
+  if (existing) return existing
+
+  const config = integrationNodeConfigSchema.parse(node.config ?? {})
+  if (!config.connectionId && !config.providerKey) {
+    throw new Error(`Integration node ${node.key} has no provider or connection binding`)
+  }
+
+  const operation = node.type === 'http_request' ? config.operation : node.type
+  if (!operation) throw new Error(`Integration node ${node.key} has no configured operation`)
+
+  const queued = await queueIntegrationDispatch(
+    tx,
+    {
+      workspaceId: run.workspaceId,
+      environment: run.environment,
+      runId: run.id,
+      stepId: step.id,
+      nodeId: node.id,
+    },
+    {
+      connectionId: config.connectionId,
+      providerKey: config.providerKey,
+      operation,
+      inputTemplate: config.input,
+      subject: runtimeSubject(run),
+    },
+  )
+
+  const wait = {
+    kind: 'event' as const,
+    eventKey: 'integration.execution_succeeded',
+    match: { resourceId: queued.dispatchId },
+    listenAfter: step.startedAt,
+    timeoutAt: null,
+  }
+  await createWait(tx, run, node, step, wait)
+  return {
+    kind: 'waiting',
+    wait,
+    output: { dispatchId: queued.dispatchId, operation, connectionId: queued.connectionId },
+  }
+}
+
 async function publishEventNode(tx: Tx, run: RuntimeRun, node: RuntimeNode, step: RuntimeStep) {
   const config = publishEventConfigSchema.parse(node.config)
   const effect = await ensureJourneyEffect(
@@ -613,7 +665,7 @@ export async function executeJourneyNode(
     case 'generate_payment_link':
     case 'update_crm':
     case 'create_ticket':
-      throw new Error(`Integration executor for ${node.type} is not configured yet`)
+      return integrationNode(tx, run, node, step)
     case 'api_event':
     case 'webhook':
     case 'schedule':

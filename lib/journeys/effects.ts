@@ -69,6 +69,14 @@ export async function ensureJourneyEffect(
   return { ...existing, created: false }
 }
 
+/** Associate a still-pending logical effect with its durable outbox/remote identity. */
+export async function linkJourneyEffect(tx: Tx, effectId: string, externalId: string): Promise<void> {
+  await tx
+    .update(journeyEffects)
+    .set({ externalId, updatedAt: new Date() })
+    .where(and(eq(journeyEffects.id, effectId), eq(journeyEffects.status, 'pending')))
+}
+
 export async function completeJourneyEffect(
   tx: Tx,
   effectId: string,
@@ -86,14 +94,24 @@ export async function completeJourneyEffect(
     .where(eq(journeyEffects.id, effectId))
 }
 
+function effectError(error: unknown): Record<string, unknown> {
+  if (!(error instanceof Error)) return { message: String(error) }
+  const row = error as Error & { code?: unknown; retryable?: unknown; statusCode?: unknown }
+  return {
+    name: error.name,
+    message: error.message,
+    ...(typeof row.code === 'string' ? { code: row.code } : {}),
+    ...(typeof row.retryable === 'boolean' ? { retryable: row.retryable } : {}),
+    ...(typeof row.statusCode === 'number' ? { statusCode: row.statusCode } : {}),
+  }
+}
+
 export async function failJourneyEffect(tx: Tx, effectId: string, error: unknown): Promise<void> {
   await tx
     .update(journeyEffects)
     .set({
       status: 'failed',
-      error: {
-        message: error instanceof Error ? error.message : String(error),
-      },
+      error: effectError(error),
       updatedAt: new Date(),
     })
     .where(eq(journeyEffects.id, effectId))

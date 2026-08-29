@@ -46,6 +46,7 @@ export const ID_PREFIXES = {
   campaignRecipient: 'cr',
   connection: 'con',
   integrationEvent: 'iev',
+  integrationDispatch: 'idsp',
   fieldMapping: 'fm',
   apiKey: 'key',
   webhookEndpoint: 'whe',

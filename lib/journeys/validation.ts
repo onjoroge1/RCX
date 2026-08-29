@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm'
 
 import type { Tx } from '@/lib/audit'
 import { journeyEdges, journeyNodes, journeys, journeyVersions, messages, messageVersions } from '@/lib/db/schema'
+import { integrationNodeConfigSchema } from '@/lib/integrations/runtime-types'
 import {
   goalRuntimeConfigSchema,
   messageRuntimeConfigSchema,
@@ -14,6 +15,13 @@ import {
 } from './runtime-types'
 
 const MESSAGE_TYPES = new Set(['send_message', 'present_replies', 'send_fallback', 'request_free_text'])
+const INTEGRATION_TYPES = new Set([
+  'http_request',
+  'create_booking',
+  'generate_payment_link',
+  'update_crm',
+  'create_ticket',
+])
 
 export async function prepareJourneyVersionForPublication(
   tx: Tx,
@@ -81,6 +89,16 @@ export async function prepareJourneyVersionForPublication(
     if (node.type === 'time_window') timeWindowConfigSchema.parse(node.config)
     if (node.type === 'publish_event') publishEventConfigSchema.parse(node.config)
     if (node.type === 'goal') goalRuntimeConfigSchema.parse(node.config ?? {})
+
+    if (INTEGRATION_TYPES.has(node.type)) {
+      const config = integrationNodeConfigSchema.parse(node.config ?? {})
+      if (!config.providerKey && !config.connectionId) {
+        throw new Error(`Integration node “${node.key}” must select a provider or connection.`)
+      }
+      if (node.type === 'http_request' && !config.operation) {
+        throw new Error(`HTTP integration node “${node.key}” must select an allowed operation.`)
+      }
+    }
 
     if (MESSAGE_TYPES.has(node.type)) {
       messageRuntimeConfigSchema.parse(node.config ?? {})
