@@ -53,7 +53,7 @@ export function assertCanRevokePlatformAdmin(input: {
   if (!input.target.isPlatformAdmin) {
     throw new AdminInvariantError('This user is not a platform administrator.')
   }
-  if (input.activePlatformAdminCount <= 1) {
+  if (input.target.status === 'active' && input.activePlatformAdminCount <= 1) {
     throw new AdminInvariantError('RCX must retain at least one active platform administrator.')
   }
 }
