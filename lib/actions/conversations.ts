@@ -18,6 +18,7 @@ import { requirePermission, PERMISSIONS, ForbiddenError } from '@/lib/auth/permi
 import { recordAudit, type Tx } from '@/lib/audit'
 import { newId } from '@/lib/ids'
 import { queueOutboundConversationMessage } from '@/lib/messaging/outbox'
+import { scheduleWorkerDrain } from '@/lib/workers/schedule'
 
 export type ActionResult = { ok: true } | { ok: false; error: string }
 
@@ -114,6 +115,7 @@ export async function takeOverConversation(rawId: string): Promise<ActionResult>
       })
     })
 
+    scheduleWorkerDrain('conversation_taken_over')
     revalidatePath('/app/conversations')
     revalidatePath('/app/overview')
     return { ok: true }
@@ -179,6 +181,7 @@ export async function resumeAutomation(rawId: string): Promise<ActionResult> {
       })
     })
 
+    scheduleWorkerDrain('conversation_returned_to_automation')
     revalidatePath('/app/conversations')
     return { ok: true }
   } catch (e) {
@@ -256,6 +259,7 @@ export async function sendReply(input: {
       })
     })
 
+    if (!parsed.isInternalNote) scheduleWorkerDrain('agent_reply_queued')
     revalidatePath('/app/conversations')
     return { ok: true }
   } catch (e) {

@@ -1,23 +1,13 @@
-import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 import { processJourneyBatch } from '@/lib/journeys/worker'
+import { workerRequestAuthorized } from '@/lib/workers/auth'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-function authorized(request: Request): boolean {
-  const secret = process.env.RCX_WORKER_SECRET
-  if (!secret || secret.length < 24) return false
-  const header = request.headers.get('authorization')
-  const value = header?.startsWith('Bearer ') ? header.slice(7) : ''
-  const expected = Buffer.from(secret, 'utf8')
-  const actual = Buffer.from(value, 'utf8')
-  return expected.length === actual.length && timingSafeEqual(expected, actual)
-}
-
 export async function POST(request: Request) {
-  if (!authorized(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!workerRequestAuthorized(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   const result = await processJourneyBatch(25)
   return NextResponse.json({ ok: true, journeys: result })
 }

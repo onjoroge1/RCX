@@ -9,6 +9,7 @@ import {
   isGoogleWebhookVerification,
   type GooglePubSubEnvelope,
 } from '@/lib/messaging/providers/google-webhook'
+import { scheduleWorkerDrain } from '@/lib/workers/schedule'
 
 export const runtime = 'nodejs'
 
@@ -43,7 +44,11 @@ export async function POST(
     if (!result.accepted) {
       return NextResponse.json({ error: result.reason }, { status: 401 })
     }
-    // A duplicate is still a successful delivery from Google's perspective.
+
+    // Acknowledge Google immediately; normalize/process the durable inbox row
+    // after the response. Duplicate deliveries are harmless and may still help
+    // drain older work that survived a prior deployment interruption.
+    scheduleWorkerDrain('google_rbm_webhook')
     return new Response(null, { status: 200 })
   } catch (error) {
     // Authenticated-but-unsupported callbacks must not create a provider retry
