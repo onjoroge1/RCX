@@ -1,4 +1,12 @@
 import { GenericMarketingPage } from '@/components/marketing/generic-page'
+import { marketingMetadata } from '@/lib/seo'
+
+export const metadata = marketingMetadata({
+  title: 'Business RCS platform',
+  description:
+    'Design rich RCS messages, automate customer journeys, operate two-way conversations, connect business systems, and measure completed outcomes in RCX.',
+  path: '/product',
+})
 
 export default function ProductPage() {
   return (
