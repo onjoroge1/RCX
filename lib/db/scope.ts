@@ -32,6 +32,13 @@ export class NoWorkspaceError extends Error {
   }
 }
 
+export class InactiveUserError extends Error {
+  constructor() {
+    super('User account is not active')
+    this.name = 'InactiveUserError'
+  }
+}
+
 export class PlatformAdminRequiredError extends Error {
   constructor() {
     super('Forbidden: platform admin required')
@@ -87,11 +94,12 @@ export const getScope = cache(async (): Promise<Scope> => {
     .select({
       workspaceId: workspaceMembers.workspaceId,
       roleId: workspaceMembers.roleId,
-      status: workspaceMembers.status,
+      membershipStatus: workspaceMembers.status,
       defaultEnvironment: workspaceMembers.defaultEnvironment,
       organizationId: workspaces.organizationId,
       suspendedAt: workspaces.suspendedAt,
       isPlatformAdmin: users.isPlatformAdmin,
+      userStatus: users.status,
       defaultWorkspaceId: users.defaultWorkspaceId,
     })
     .from(workspaceMembers)
@@ -99,7 +107,11 @@ export const getScope = cache(async (): Promise<Scope> => {
     .innerJoin(users, eq(users.id, workspaceMembers.userId))
     .where(eq(workspaceMembers.userId, userId))
 
-  const usable = memberships.filter((m) => m.status === 'active' && m.suspendedAt === null)
+  if (memberships.length > 0 && memberships[0]?.userStatus !== 'active') {
+    throw new InactiveUserError()
+  }
+
+  const usable = memberships.filter((m) => m.membershipStatus === 'active' && m.suspendedAt === null)
   if (usable.length === 0) throw new NoWorkspaceError()
 
   const active =
@@ -127,6 +139,9 @@ export const listMyWorkspaces = cache(async () => {
   const userId = await getUserId()
   if (!userId) throw new NotAuthenticatedError()
 
+  const [user] = await db.select({ status: users.status }).from(users).where(eq(users.id, userId)).limit(1)
+  if (!user || user.status !== 'active') throw new InactiveUserError()
+
   return db
     .select({
       id: workspaces.id,
@@ -136,7 +151,13 @@ export const listMyWorkspaces = cache(async () => {
     })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaces.id, workspaceMembers.workspaceId))
-    .where(and(eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, 'active')))
+    .where(
+      and(
+        eq(workspaceMembers.userId, userId),
+        eq(workspaceMembers.status, 'active'),
+        eq(workspaces.suspendedAt, null),
+      ),
+    )
 })
 
 type ScopedTable = PgTable & {
