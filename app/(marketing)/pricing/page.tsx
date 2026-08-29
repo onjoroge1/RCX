@@ -1,12 +1,14 @@
-import type { Metadata } from 'next'
 import Link from 'next/link'
 import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { marketingMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
-  title: 'Pricing — RCX',
-  description: 'Simple, usage-based pricing for RCS business messaging.',
-}
+export const metadata = marketingMetadata({
+  title: 'RCS business messaging pricing',
+  description:
+    'Explore RCX pricing for building, testing, and running live RCS customer journeys with two-way conversations, analytics, integrations, and SMS fallback.',
+  path: '/pricing',
+})
 
 const tiers = [
   {
