@@ -1,10 +1,12 @@
-import type { Metadata } from 'next'
 import { GenericMarketingPage } from '@/components/marketing/generic-page'
+import { marketingMetadata } from '@/lib/seo'
 
-export const metadata: Metadata = {
-  title: 'Resources — RCX',
-  description: 'Guides, documentation, and playbooks for building RCS business journeys.',
-}
+export const metadata = marketingMetadata({
+  title: 'RCS business messaging resources',
+  description:
+    'Explore RCX documentation, RCS journey playbooks, implementation guidance, case studies, changelog updates, and support resources.',
+  path: '/resources',
+})
 
 export default function Page() {
   return (

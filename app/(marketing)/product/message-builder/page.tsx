@@ -1,4 +1,12 @@
 import { GenericMarketingPage } from '@/components/marketing/generic-page'
+import { marketingMetadata } from '@/lib/seo'
+
+export const metadata = marketingMetadata({
+  title: 'RCS message builder',
+  description:
+    'Design branded RCS rich cards, suggested replies, native actions, personalization, accessibility checks, and SMS fallback with a live device preview.',
+  path: '/product/message-builder',
+})
 
 export default function Page() {
   return (
