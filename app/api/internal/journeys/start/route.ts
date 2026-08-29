@@ -1,8 +1,8 @@
-import { timingSafeEqual } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { startJourneyRun } from '@/lib/journeys/start'
+import { workerRequestAuthorized } from '@/lib/workers/auth'
 import { scheduleWorkerDrain } from '@/lib/workers/schedule'
 
 export const runtime = 'nodejs'
@@ -18,18 +18,8 @@ const inputSchema = z.object({
   context: z.record(z.string(), z.unknown()).optional(),
 })
 
-function authorized(request: Request): boolean {
-  const secret = process.env.RCX_WORKER_SECRET
-  if (!secret || secret.length < 24) return false
-  const header = request.headers.get('authorization')
-  const value = header?.startsWith('Bearer ') ? header.slice(7) : ''
-  const expected = Buffer.from(secret, 'utf8')
-  const actual = Buffer.from(value, 'utf8')
-  return expected.length === actual.length && timingSafeEqual(expected, actual)
-}
-
 export async function POST(request: Request) {
-  if (!authorized(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (!workerRequestAuthorized(request)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   let parsed: z.infer<typeof inputSchema>
   try {
