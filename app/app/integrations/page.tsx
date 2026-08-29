@@ -173,16 +173,17 @@ function StripeSetup({ item }: { item: IntegrationCatalogItemDto }) {
           <Label htmlFor="stripe-key">Secret or restricted key</Label>
           <Input id="stripe-key" name="secretKey" type="password" required minLength={16} placeholder="sk_test_… / rk_test_…" autoComplete="new-password" />
         </Field>
-        <div className="flex gap-2 lg:col-span-3">
+        <div className="lg:col-span-3">
           <Button type="submit">{item.connectionId ? 'Save Stripe connection' : 'Connect Stripe'}</Button>
-          {item.connectionId && (
-            <form action={disconnectFirstClassIntegrationForm}>
-              <input type="hidden" name="providerKey" value="stripe" />
-              <Button type="submit" variant="outline">Disconnect</Button>
-            </form>
-          )}
         </div>
       </form>
+
+      {item.connectionId && (
+        <form action={disconnectFirstClassIntegrationForm} className="mt-3">
+          <input type="hidden" name="providerKey" value="stripe" />
+          <Button type="submit" variant="outline">Disconnect Stripe</Button>
+        </form>
+      )}
     </Card>
   )
 }
