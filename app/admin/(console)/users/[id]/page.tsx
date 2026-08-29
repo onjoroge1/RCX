@@ -29,39 +29,18 @@ export default async function AdminUserDetailPage({
     <div>
       <Link href="/admin/users" className="text-sm font-medium text-primary hover:underline">← Users</Link>
 
-      <div className="mt-5 flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-3xl font-semibold tracking-tight">{user.name ?? user.email}</h1>
-            <span className={user.status === 'active'
-              ? 'rounded-full bg-success/10 px-2 py-1 text-xs font-medium text-success'
-              : 'rounded-full bg-error/10 px-2 py-1 text-xs font-medium text-error'}>
-              {user.status}
-            </span>
-            {user.isPlatformAdmin && <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Platform admin</span>}
-            {isSelf && <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium">You</span>}
-          </div>
-          <p className="mt-2 text-sm text-muted-foreground">{user.email}</p>
+      <div className="mt-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-3xl font-semibold tracking-tight">{user.name ?? user.email}</h1>
+          <span className={user.status === 'active'
+            ? 'rounded-full bg-success/10 px-2 py-1 text-xs font-medium text-success'
+            : 'rounded-full bg-error/10 px-2 py-1 text-xs font-medium text-error'}>
+            {user.status}
+          </span>
+          {user.isPlatformAdmin && <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Platform admin</span>}
+          {isSelf && <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium">You</span>}
         </div>
-
-        <div className="flex flex-wrap gap-2">
-          {user.status === 'active' ? (
-            <ActionButton userId={user.id} action="suspend" label="Suspend user" destructive disabled={isSelf} />
-          ) : user.status === 'suspended' ? (
-            <ActionButton userId={user.id} action="reactivate" label="Reactivate user" />
-          ) : null}
-
-          {user.isPlatformAdmin ? (
-            <ActionButton userId={user.id} action="revoke_platform_admin" label="Revoke platform admin" disabled={isSelf} />
-          ) : (
-            <ActionButton
-              userId={user.id}
-              action="grant_platform_admin"
-              label="Grant platform admin"
-              disabled={user.status !== 'active'}
-            />
-          )}
-        </div>
+        <p className="mt-2 text-sm text-muted-foreground">{user.email}</p>
       </div>
 
       {feedback.error && <div className="mt-5 rounded-lg border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">{feedback.error}</div>}
@@ -72,6 +51,30 @@ export default async function AdminUserDetailPage({
           RCX prevents self-suspension and self-demotion. Use a second active platform administrator for those changes.
         </div>
       )}
+
+      <section className="mt-6 rounded-xl border border-border bg-card p-5 rcx-shadow">
+        <h2 className="font-semibold">Account controls</h2>
+        <p className="mt-1 text-sm text-muted-foreground">Every state or privilege change requires an operator reason and writes a platform-level audit record.</p>
+        <div className="mt-4 grid gap-3 xl:grid-cols-2">
+          {user.status === 'active' ? (
+            <ActionForm userId={user.id} action="suspend" label="Suspend user" destructive disabled={isSelf} placeholder="Why should this account lose access?" />
+          ) : user.status === 'suspended' ? (
+            <ActionForm userId={user.id} action="reactivate" label="Reactivate user" placeholder="Why is access being restored?" />
+          ) : null}
+
+          {user.isPlatformAdmin ? (
+            <ActionForm userId={user.id} action="revoke_platform_admin" label="Revoke platform admin" disabled={isSelf} placeholder="Why is platform privilege being removed?" />
+          ) : (
+            <ActionForm
+              userId={user.id}
+              action="grant_platform_admin"
+              label="Grant platform admin"
+              disabled={user.status !== 'active'}
+              placeholder="Why does this user need control-plane access?"
+            />
+          )}
+        </div>
+      </section>
 
       <section className="mt-8 rounded-xl border border-border bg-card p-6 rcx-shadow">
         <h2 className="font-semibold">Account metadata</h2>
@@ -117,24 +120,30 @@ export default async function AdminUserDetailPage({
   )
 }
 
-function ActionButton({
+function ActionForm({
   userId,
   action,
   label,
+  placeholder,
   destructive = false,
   disabled = false,
 }: {
   userId: string
   action: 'suspend' | 'reactivate' | 'grant_platform_admin' | 'revoke_platform_admin'
   label: string
+  placeholder: string
   destructive?: boolean
   disabled?: boolean
 }) {
   return (
-    <form action={mutateUserStateForm}>
+    <form action={mutateUserStateForm} className="rounded-lg border border-border bg-muted/30 p-3">
       <input type="hidden" name="userId" value={userId} />
       <input type="hidden" name="action" value={action} />
-      <Button type="submit" variant={destructive ? 'destructive' : 'outline'} disabled={disabled}>{label}</Button>
+      <label className="text-xs font-medium text-muted-foreground">
+        Reason
+        <input className="builder-input mt-1" name="reason" required minLength={8} maxLength={500} placeholder={placeholder} disabled={disabled} />
+      </label>
+      <Button type="submit" className="mt-3" variant={destructive ? 'destructive' : 'outline'} disabled={disabled}>{label}</Button>
     </form>
   )
 }
