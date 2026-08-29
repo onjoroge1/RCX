@@ -3,7 +3,11 @@ import { redirect } from 'next/navigation'
 import { ShieldCheck } from 'lucide-react'
 
 import { signOutAction } from '@/lib/actions/auth'
-import { requirePlatformAdmin } from '@/lib/db/scope'
+import {
+  NotAuthenticatedError,
+  PlatformAdminRequiredError,
+  requirePlatformAdmin,
+} from '@/lib/db/scope'
 import { Logo } from '@/components/shared/logo'
 import { Button } from '@/components/ui/button'
 
@@ -11,8 +15,11 @@ export default async function AdminConsoleLayout({ children }: { children: React
   let admin
   try {
     admin = await requirePlatformAdmin()
-  } catch {
-    redirect('/admin/login')
+  } catch (error) {
+    if (error instanceof NotAuthenticatedError || error instanceof PlatformAdminRequiredError) {
+      redirect('/admin/login')
+    }
+    throw error
   }
 
   return (
