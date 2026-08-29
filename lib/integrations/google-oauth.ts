@@ -2,11 +2,14 @@ import 'server-only'
 
 import { z } from 'zod'
 
+import {
+  GOOGLE_CALENDAR_EVENTS_SCOPE,
+  GOOGLE_TOKEN_ENDPOINT,
+  googleCalendarAuthorizationUrl,
+} from './google-oauth-contract'
 import { IntegrationExecutionError } from './runtime-types'
 
-export const GOOGLE_CALENDAR_EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
-export const GOOGLE_AUTHORIZATION_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
-export const GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
+export { GOOGLE_CALENDAR_EVENTS_SCOPE } from './google-oauth-contract'
 
 const tokenResponseSchema = z.object({
   access_token: z.string().min(1).max(16_384),
@@ -63,18 +66,7 @@ export function buildGoogleCalendarAuthorizationUrl(input: {
   redirectUri: string
 }): string {
   const { clientId } = googleOAuthClientConfig()
-  const url = new URL(GOOGLE_AUTHORIZATION_ENDPOINT)
-  url.searchParams.set('client_id', clientId)
-  url.searchParams.set('redirect_uri', input.redirectUri)
-  url.searchParams.set('response_type', 'code')
-  url.searchParams.set('scope', GOOGLE_CALENDAR_EVENTS_SCOPE)
-  url.searchParams.set('access_type', 'offline')
-  url.searchParams.set('include_granted_scopes', 'true')
-  // A connector setup/reconnect needs a durable refresh token. Google otherwise
-  // returns refresh_token only on the first authorization for a client/user pair.
-  url.searchParams.set('prompt', 'consent')
-  url.searchParams.set('state', input.state)
-  return url.toString()
+  return googleCalendarAuthorizationUrl({ clientId, ...input })
 }
 
 async function tokenRequest(body: URLSearchParams): Promise<GoogleOAuthTokenSet> {
