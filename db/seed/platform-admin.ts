@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { pool, seedDb } from './client'
-import { users } from '@/lib/db/schema'
+import { auditLog, users } from '@/lib/db/schema'
 import { newId } from '@/lib/ids'
 
 const configSchema = z.object({
@@ -27,36 +27,68 @@ async function main() {
 
   const passwordHash = await bcrypt.hash(parsed.data.password, 12)
   const [existing] = await seedDb
-    .select({ id: users.id })
+    .select({
+      id: users.id,
+      name: users.name,
+      status: users.status,
+      isPlatformAdmin: users.isPlatformAdmin,
+    })
     .from(users)
     .where(eq(users.email, parsed.data.email))
     .limit(1)
 
-  if (existing) {
-    await seedDb
-      .update(users)
-      .set({
+  const userId = existing?.id ?? newId('user')
+
+  await seedDb.transaction(async (tx) => {
+    if (existing) {
+      await tx
+        .update(users)
+        .set({
+          name: parsed.data.name,
+          passwordHash,
+          isPlatformAdmin: true,
+          status: 'active',
+        })
+        .where(eq(users.id, userId))
+    } else {
+      await tx.insert(users).values({
+        id: userId,
         name: parsed.data.name,
+        email: parsed.data.email,
         passwordHash,
         isPlatformAdmin: true,
         status: 'active',
+        defaultWorkspaceId: null,
       })
-      .where(eq(users.id, existing.id))
-    console.log(`Updated platform admin identity: ${parsed.data.email}`)
-    return
-  }
+    }
 
-  await seedDb.insert(users).values({
-    id: newId('user'),
-    name: parsed.data.name,
-    email: parsed.data.email,
-    passwordHash,
-    isPlatformAdmin: true,
-    status: 'active',
-    defaultWorkspaceId: null,
+    await tx.insert(auditLog).values({
+      id: newId('auditLog'),
+      workspaceId: null,
+      environment: null,
+      actorType: 'system',
+      actorLabel: 'platform-admin-bootstrap',
+      action: existing ? 'platform_admin.rekeyed' : 'platform_admin.created',
+      resourceType: 'user',
+      resourceId: userId,
+      resourceLabel: parsed.data.email,
+      result: 'success',
+      before: existing
+        ? {
+            name: existing.name,
+            status: existing.status,
+            isPlatformAdmin: existing.isPlatformAdmin,
+          }
+        : null,
+      after: {
+        name: parsed.data.name,
+        status: 'active',
+        isPlatformAdmin: true,
+      },
+    })
   })
 
-  console.log(`Created platform admin identity: ${parsed.data.email}`)
+  console.log(`${existing ? 'Updated' : 'Created'} platform admin identity: ${parsed.data.email}`)
 }
 
 main()
