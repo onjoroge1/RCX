@@ -31,6 +31,13 @@ export class NoWorkspaceError extends Error {
   }
 }
 
+export class PlatformAdminRequiredError extends Error {
+  constructor() {
+    super('Forbidden: platform admin required')
+    this.name = 'PlatformAdminRequiredError'
+  }
+}
+
 export type Scope = {
   userId: string
   workspaceId: string
@@ -38,6 +45,12 @@ export type Scope = {
   environment: Environment
   roleId: string
   isPlatformAdmin: boolean
+}
+
+export type PlatformAdminIdentity = {
+  userId: string
+  name: string | null
+  email: string
 }
 
 /**
@@ -146,14 +159,33 @@ export function scoped(table: ScopedTable, scope: Scope): SQL | undefined {
   return and(...predicates)
 }
 
-/** Throws unless the current scope belongs to a platform admin. */
-export async function requirePlatformAdmin(): Promise<Scope> {
-  const scope = await getScope()
-  if (!scope.isPlatformAdmin) {
-    throw new Error('Forbidden: platform admin required')
+/**
+ * Platform administration is a control-plane capability, not a tenant role.
+ * Resolve it directly from the authenticated user so a dedicated platform admin
+ * does not need a synthetic customer workspace membership just to reach /admin.
+ */
+export const requirePlatformAdmin = cache(async (): Promise<PlatformAdminIdentity> => {
+  const userId = await getUserId()
+  if (!userId) throw new NotAuthenticatedError()
+
+  const [user] = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      status: users.status,
+      isPlatformAdmin: users.isPlatformAdmin,
+    })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1)
+
+  if (!user || user.status !== 'active' || !user.isPlatformAdmin) {
+    throw new PlatformAdminRequiredError()
   }
-  return scope
-}
+
+  return { userId: user.id, name: user.name, email: user.email }
+})
 
 /**
  * Demo hook from BUILD_PLAN 0.3 that survives the move to a real database:
