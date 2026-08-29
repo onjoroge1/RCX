@@ -3,6 +3,7 @@ import 'server-only'
 import { after } from 'next/server'
 
 import { drainWorkerPipelines } from './orchestrator'
+import { FAST_WORKER_DRAIN } from './policy'
 
 /**
  * Best-effort low-latency kick for request-driven work. The durable Postgres
@@ -12,7 +13,7 @@ import { drainWorkerPipelines } from './orchestrator'
 export function scheduleWorkerDrain(reason: string): void {
   after(async () => {
     try {
-      const result = await drainWorkerPipelines({ batchSize: 5, maxPasses: 3, timeBudgetMs: 45_000 })
+      const result = await drainWorkerPipelines(FAST_WORKER_DRAIN)
       if (result.exhausted || result.stoppedByBudget) {
         console.info('rcx_worker_drain_deferred_remainder', {
           reason,
