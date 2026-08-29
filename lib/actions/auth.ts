@@ -14,6 +14,7 @@ import { organizations, users, workspaceMembers, workspaces, roles } from '@/lib
 import { newId } from '@/lib/ids'
 import { ENVIRONMENT_COOKIE, WORKSPACE_COOKIE, getScope } from '@/lib/db/scope'
 import { slugify } from '@/lib/format'
+import { isPlatformAdminUsername, platformAdminIdentityEmail } from '@/lib/admin/login-contract'
 
 export type AuthFormState = { error?: string } | undefined
 
@@ -32,6 +33,11 @@ const COOKIE_OPTS = {
 const signInSchema = z.object({
   email: z.string().email('Enter a valid work email.'),
   password: z.string().min(1, 'Enter your password.'),
+})
+
+const adminSignInSchema = z.object({
+  username: z.string().trim().min(1, 'Enter the admin username.').max(80),
+  password: z.string().min(1, 'Enter your password.').max(200),
 })
 
 export async function signInAction(
@@ -58,6 +64,52 @@ export async function signInAction(
     // NEXT_REDIRECT is how a successful signIn returns — rethrow it untouched.
     if (error instanceof AuthError) {
       return { error: 'That email and password did not match an account.' }
+    }
+    throw error
+  }
+}
+
+/**
+ * Dedicated control-plane sign in. `/admin/login` intentionally uses a stable
+ * operator username while the underlying Auth.js identity remains an email-backed
+ * database user. The password is still verified by the normal Credentials provider
+ * and never lives in source code.
+ */
+export async function adminSignInAction(
+  _prev: AuthFormState,
+  formData: FormData,
+): Promise<AuthFormState> {
+  const parsed = adminSignInSchema.safeParse({
+    username: formData.get('username'),
+    password: formData.get('password'),
+  })
+  if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+  // Deliberately keep all invalid-admin cases on one response path.
+  if (!isPlatformAdminUsername(parsed.data.username)) {
+    return { error: 'That username and password did not match the platform administrator.' }
+  }
+
+  const email = platformAdminIdentityEmail(process.env.PLATFORM_ADMIN_EMAIL)
+  const [admin] = await db
+    .select({ id: users.id, status: users.status, isPlatformAdmin: users.isPlatformAdmin })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1)
+
+  if (!admin || admin.status !== 'active' || !admin.isPlatformAdmin) {
+    return { error: 'That username and password did not match the platform administrator.' }
+  }
+
+  try {
+    await signIn('credentials', {
+      email,
+      password: parsed.data.password,
+      redirectTo: '/admin',
+    })
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return { error: 'That username and password did not match the platform administrator.' }
     }
     throw error
   }
