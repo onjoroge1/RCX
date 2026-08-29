@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { and, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 
 import { recordPlatformAudit } from '@/lib/audit'
@@ -17,19 +17,27 @@ import { getTxDb } from '@/lib/db'
 import { users, workspaces } from '@/lib/db/schema'
 import { requirePlatformAdmin } from '@/lib/db/scope'
 
+const reasonSchema = z.string().trim().min(8, 'Enter a reason of at least 8 characters.').max(500)
+
 const workspaceActionSchema = z.object({
   workspaceId: z.string().min(1).max(200),
   action: z.enum(['suspend', 'reactivate']),
+  reason: reasonSchema,
 })
 
 const userActionSchema = z.object({
   userId: z.string().min(1).max(200),
   action: z.enum(['suspend', 'reactivate', 'grant_platform_admin', 'revoke_platform_admin']),
+  reason: reasonSchema,
 })
 
 function adminTarget(path: string, params: Record<string, string>): string {
   const query = new URLSearchParams(params)
   return `${path}?${query.toString()}`
+}
+
+function validationError(error: z.ZodError): string {
+  return error.issues[0]?.message ?? 'Invalid control-plane action.'
 }
 
 function errorMessage(error: unknown): string {
@@ -41,10 +49,11 @@ export async function mutateWorkspaceStateForm(formData: FormData): Promise<neve
   const parsed = workspaceActionSchema.safeParse({
     workspaceId: formData.get('workspaceId'),
     action: formData.get('action'),
+    reason: formData.get('reason'),
   })
   const fallbackId = String(formData.get('workspaceId') || '')
   if (!parsed.success) {
-    redirect(adminTarget(`/admin/workspaces/${encodeURIComponent(fallbackId)}`, { error: 'Invalid workspace action.' }))
+    redirect(adminTarget(`/admin/workspaces/${encodeURIComponent(fallbackId)}`, { error: validationError(parsed.error) }))
   }
 
   const admin = await requirePlatformAdmin()
@@ -69,7 +78,7 @@ export async function mutateWorkspaceStateForm(formData: FormData): Promise<neve
           resourceId: workspace.id,
           resourceLabel: workspace.name,
           before: { suspendedAt: null },
-          after: { suspendedAt: suspendedAt.toISOString() },
+          after: { suspendedAt: suspendedAt.toISOString(), reason: parsed.data.reason },
         })
       } else {
         if (!workspace.suspendedAt) throw new AdminInvariantError('Workspace is already active.')
@@ -81,7 +90,7 @@ export async function mutateWorkspaceStateForm(formData: FormData): Promise<neve
           resourceId: workspace.id,
           resourceLabel: workspace.name,
           before: { suspendedAt: workspace.suspendedAt.toISOString() },
-          after: { suspendedAt: null },
+          after: { suspendedAt: null, reason: parsed.data.reason },
         })
       }
     })
@@ -99,21 +108,23 @@ export async function mutateUserStateForm(formData: FormData): Promise<never> {
   const parsed = userActionSchema.safeParse({
     userId: formData.get('userId'),
     action: formData.get('action'),
+    reason: formData.get('reason'),
   })
   const fallbackId = String(formData.get('userId') || '')
   if (!parsed.success) {
-    redirect(adminTarget(`/admin/users/${encodeURIComponent(fallbackId)}`, { error: 'Invalid user action.' }))
+    redirect(adminTarget(`/admin/users/${encodeURIComponent(fallbackId)}`, { error: validationError(parsed.error) }))
   }
 
   const admin = await requirePlatformAdmin()
   try {
     await getTxDb().transaction(async (tx) => {
       // Serialize privilege-removing mutations against the complete active-admin set.
-      // Two concurrent demotions therefore cannot both observe "2 admins" and leave zero.
+      // A stable lock order also avoids deadlock between concurrent control-plane changes.
       const activeAdmins = await tx
         .select({ id: users.id })
         .from(users)
         .where(and(eq(users.isPlatformAdmin, true), eq(users.status, 'active')))
+        .orderBy(asc(users.id))
         .for('update')
 
       const [target] = await tx
@@ -135,6 +146,7 @@ export async function mutateUserStateForm(formData: FormData): Promise<never> {
         status: target.status,
         isPlatformAdmin: target.isPlatformAdmin,
       }
+      const reason = parsed.data.reason
 
       switch (parsed.data.action) {
         case 'suspend': {
@@ -150,7 +162,7 @@ export async function mutateUserStateForm(formData: FormData): Promise<never> {
             resourceId: target.id,
             resourceLabel: target.email,
             before: { status: target.status, isPlatformAdmin: target.isPlatformAdmin },
-            after: { status: 'suspended', isPlatformAdmin: target.isPlatformAdmin },
+            after: { status: 'suspended', isPlatformAdmin: target.isPlatformAdmin, reason },
           })
           break
         }
@@ -163,7 +175,7 @@ export async function mutateUserStateForm(formData: FormData): Promise<never> {
             resourceId: target.id,
             resourceLabel: target.email,
             before: { status: target.status, isPlatformAdmin: target.isPlatformAdmin },
-            after: { status: 'active', isPlatformAdmin: target.isPlatformAdmin },
+            after: { status: 'active', isPlatformAdmin: target.isPlatformAdmin, reason },
           })
           break
         }
@@ -176,7 +188,7 @@ export async function mutateUserStateForm(formData: FormData): Promise<never> {
             resourceId: target.id,
             resourceLabel: target.email,
             before: { status: target.status, isPlatformAdmin: false },
-            after: { status: target.status, isPlatformAdmin: true },
+            after: { status: target.status, isPlatformAdmin: true, reason },
           })
           break
         }
@@ -193,7 +205,7 @@ export async function mutateUserStateForm(formData: FormData): Promise<never> {
             resourceId: target.id,
             resourceLabel: target.email,
             before: { status: target.status, isPlatformAdmin: true },
-            after: { status: target.status, isPlatformAdmin: false },
+            after: { status: target.status, isPlatformAdmin: false, reason },
           })
           break
         }
