@@ -8,6 +8,7 @@ import type { Environment } from '@/lib/db/scope'
 import { newId } from '@/lib/ids'
 import { ensureJourneyEffect, linkJourneyEffect } from '@/lib/journeys/effects'
 import { controlledIntegrationUrl } from './policy'
+import { prepareProviderRequest } from './provider-adapters'
 import { operationBindingsSchema, IntegrationExecutionError } from './runtime-types'
 import { resolveIntegrationInput } from './templates'
 
@@ -197,8 +198,20 @@ export async function queueIntegrationDispatch(
     binding.method,
     binding.path,
   )
+
   const resolvedInput = resolveIntegrationInput(input.inputTemplate, input.subject)
   const dispatchId = newId('integrationDispatch')
+  const prepared = prepareProviderRequest(connection.providerKey, input.operation, resolvedInput, {
+    dispatchId,
+    runId: scope.runId,
+    idempotencyKey: effect.idempotencyKey,
+  })
+  const frozenRequest = {
+    __rcxPreparedRequest: 1,
+    providerKey: connection.providerKey,
+    bodyEncoding: prepared.bodyEncoding,
+    body: prepared.body,
+  }
 
   const [created] = await tx
     .insert(integrationDispatches)
@@ -213,10 +226,12 @@ export async function queueIntegrationDispatch(
       nodeId: scope.nodeId,
       idempotencyKey: effect.idempotencyKey,
       operation: input.operation,
+      providerKeySnapshot: connection.providerKey,
       baseUrlSnapshot: endpoint.url.origin,
       method: endpoint.method,
       path: `${endpoint.url.pathname}${endpoint.url.search}`,
-      request: resolvedInput as Record<string, unknown> | null,
+      bodyEncoding: prepared.bodyEncoding,
+      request: frozenRequest as never,
       externalIdPath: binding.externalIdPath ?? null,
       status: 'pending',
       maxAttempts: binding.maxAttempts,

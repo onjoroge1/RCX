@@ -43,6 +43,13 @@
       "when": 1787200000000,
       "tag": "0005_controlled_integration_runtime",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787271600000,
+      "tag": "0006_provider_adapter_snapshots",
+      "breakpoints": true
     }
   ]
 }
