@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ShieldCheck } from 'lucide-react'
+import { Building2, LayoutDashboard, ShieldCheck, Users } from 'lucide-react'
 
 import { signOutAction } from '@/lib/actions/auth'
 import {
@@ -43,28 +43,35 @@ export default async function AdminConsoleLayout({ children }: { children: React
               <p className="text-xs text-muted-foreground">{admin.email}</p>
             </div>
             <form action={signOutAction}>
-              <Button type="submit" variant="outline" size="sm">
-                Sign out
-              </Button>
+              <Button type="submit" variant="outline" size="sm">Sign out</Button>
             </form>
           </div>
         </div>
       </header>
 
       <div className="mx-auto flex max-w-7xl gap-8 px-4 py-8 sm:px-6">
-        <aside className="hidden w-48 shrink-0 lg:block">
+        <aside className="hidden w-52 shrink-0 lg:block">
           <nav className="sticky top-8 space-y-1 text-sm">
-            <Link href="/admin" className="block rounded-lg bg-primary/10 px-3 py-2 font-medium text-primary">
-              Overview
-            </Link>
-            <p className="px-3 pt-5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Control plane
+            <AdminNav href="/admin" label="Overview" icon={LayoutDashboard} />
+            <p className="px-3 pt-5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Control plane</p>
+            <AdminNav href="/admin/workspaces" label="Workspaces" icon={Building2} />
+            <AdminNav href="/admin/users" label="Users" icon={Users} />
+            <p className="px-3 pt-5 text-xs leading-5 text-muted-foreground">
+              Customer content remains outside this console unless a future audited support-access grant explicitly permits it.
             </p>
-            <p className="px-3 py-2 text-muted-foreground">Tenant and user controls will land in the next admin slice.</p>
           </nav>
         </aside>
         <main className="min-w-0 flex-1">{children}</main>
       </div>
     </div>
+  )
+}
+
+function AdminNav({ href, label, icon: Icon }: { href: string; label: string; icon: typeof LayoutDashboard }) {
+  return (
+    <Link href={href} className="flex items-center gap-2 rounded-lg px-3 py-2 font-medium text-muted-foreground hover:bg-muted hover:text-foreground">
+      <Icon className="size-4" />
+      {label}
+    </Link>
   )
 }
