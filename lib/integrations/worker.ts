@@ -17,7 +17,7 @@ import {
 } from '@/lib/db/schema'
 import { newId } from '@/lib/ids'
 import { completeJourneyEffect, failJourneyEffect } from '@/lib/journeys/effects'
-import { integrationAuthHeaders } from './credentials'
+import { resolveIntegrationAuthHeaders } from './credentials'
 import { executeControlledHttps } from './http-client'
 import { controlledIntegrationUrl } from './policy'
 import { IntegrationExecutionError, integrationHttpMethodSchema } from './runtime-types'
@@ -44,6 +44,7 @@ type ClaimedDispatch = {
   nodeId: string
   idempotencyKey: string
   operation: string
+  providerKeySnapshot: string
   baseUrlSnapshot: string
   method: string
   path: string
@@ -144,6 +145,7 @@ async function claimDispatch(id: string): Promise<ClaimedDispatch | null> {
       nodeId: integrationDispatches.nodeId,
       idempotencyKey: integrationDispatches.idempotencyKey,
       operation: integrationDispatches.operation,
+      providerKeySnapshot: integrationDispatches.providerKeySnapshot,
       baseUrlSnapshot: integrationDispatches.baseUrlSnapshot,
       method: integrationDispatches.method,
       path: integrationDispatches.path,
@@ -161,6 +163,7 @@ async function loadExecutionConnection(dispatch: ClaimedDispatch) {
   const [connection] = await db
     .select({
       id: integrationConnections.id,
+      providerKey: integrationConnections.providerKey,
       state: integrationConnections.state,
       baseUrl: integrationConnections.baseUrl,
       allowedMethods: integrationConnections.allowedMethods,
@@ -183,6 +186,12 @@ async function loadExecutionConnection(dispatch: ClaimedDispatch) {
   if (!connection) {
     throw new IntegrationExecutionError('Integration connection no longer exists in this workspace/environment', {
       code: 'connection_not_found',
+      retryable: false,
+    })
+  }
+  if (connection.providerKey !== dispatch.providerKeySnapshot) {
+    throw new IntegrationExecutionError('Connection provider changed after this integration dispatch was queued', {
+      code: 'connection_policy_changed',
       retryable: false,
     })
   }
@@ -212,12 +221,6 @@ async function loadExecutionConnection(dispatch: ClaimedDispatch) {
   if (origin !== dispatch.baseUrlSnapshot) {
     throw new IntegrationExecutionError('Connection destination changed after this integration dispatch was queued', {
       code: 'connection_policy_changed',
-      retryable: false,
-    })
-  }
-  if (connection.expiresAt && connection.expiresAt <= new Date()) {
-    throw new IntegrationExecutionError('Integration credentials are expired', {
-      code: 'credentials_expired',
       retryable: false,
     })
   }
@@ -257,7 +260,14 @@ async function executeDispatch(dispatch: ClaimedDispatch) {
     dispatch.path,
   )
 
-  const authHeaders = integrationAuthHeaders(connection.credentialsEncrypted)
+  const authHeaders = await resolveIntegrationAuthHeaders({
+    connectionId: connection.id,
+    workspaceId: dispatch.workspaceId,
+    environment: dispatch.environment,
+    providerKey: connection.providerKey,
+    credentialsEncrypted: connection.credentialsEncrypted,
+    expiresAt: connection.expiresAt,
+  })
   return executeControlledHttps({
     url: endpoint.url,
     method: endpoint.method,
@@ -416,7 +426,16 @@ async function recordFailure(dispatch: ClaimedDispatch, error: unknown): Promise
   const serialized = serializeError(error)
   const terminalState =
     error instanceof IntegrationExecutionError &&
-    ['invalid_credentials', 'credentials_expired', 'invalid_connection_policy', 'connection_policy_changed', 'ssrf_blocked'].includes(error.code)
+    [
+      'invalid_credentials',
+      'credentials_expired',
+      'oauth_reauthorization_required',
+      'oauth_scope_missing',
+      'oauth_not_configured',
+      'invalid_connection_policy',
+      'connection_policy_changed',
+      'ssrf_blocked',
+    ].includes(error.code)
       ? 'error'
       : 'warning'
 
