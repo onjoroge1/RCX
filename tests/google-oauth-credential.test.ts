@@ -1,10 +1,28 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import {
+  buildGoogleCalendarAuthorizationUrl,
+  GOOGLE_CALENDAR_EVENTS_SCOPE,
+} from '@/lib/integrations/google-oauth'
+import {
+  assertGoogleOauthScope,
+  createGoogleOauthState,
+  readGoogleOauthState,
+} from '@/lib/integrations/oauth-state'
 import { googleCalendarConnectionPolicy } from '@/lib/integrations/provider-contracts'
 import { encryptedConnectionCredentialSchema } from '@/lib/integrations/runtime-types'
+import type { Scope } from '@/lib/db/scope'
 
 const EVENTS_SCOPE = 'https://www.googleapis.com/auth/calendar.events'
+const TEST_SCOPE: Scope = {
+  userId: 'usr_oauth_test',
+  workspaceId: 'ws_oauth_test',
+  organizationId: 'org_oauth_test',
+  environment: 'test',
+  roleId: 'rol_owner',
+  isPlatformAdmin: false,
+}
 
 test('Google OAuth credential requires a durable refresh token', () => {
   const valid = encryptedConnectionCredentialSchema.safeParse({
@@ -36,4 +54,48 @@ test('Google Calendar connector requests event access rather than full Calendar 
   assert.equal(policy.baseUrl, 'https://www.googleapis.com')
   assert.equal(policy.operationBindings.create_booking?.method, 'POST')
   assert.match(policy.operationBindings.create_booking?.path ?? '', /calendar\/v3\/calendars\/primary\/events/)
+})
+
+test('authorization URL requests narrow offline access and binds caller state', () => {
+  process.env.GOOGLE_OAUTH_CLIENT_ID = 'client-id.apps.googleusercontent.com'
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET = 'test-client-secret'
+
+  const url = new URL(
+    buildGoogleCalendarAuthorizationUrl({
+      state: 'state-value',
+      redirectUri: 'https://rcx.example/api/integrations/google-calendar/oauth/callback',
+    }),
+  )
+  assert.equal(url.origin + url.pathname, 'https://accounts.google.com/o/oauth2/v2/auth')
+  assert.equal(url.searchParams.get('scope'), GOOGLE_CALENDAR_EVENTS_SCOPE)
+  assert.equal(url.searchParams.get('access_type'), 'offline')
+  assert.equal(url.searchParams.get('prompt'), 'consent')
+  assert.equal(url.searchParams.get('response_type'), 'code')
+  assert.equal(url.searchParams.get('state'), 'state-value')
+})
+
+test('encrypted OAuth state binds user, workspace, environment, and setup options', () => {
+  process.env.ENCRYPTION_KEY = '22'.repeat(32)
+
+  const created = createGoogleOauthState(TEST_SCOPE, {
+    calendarId: 'primary',
+    sendUpdates: 'externalOnly',
+  })
+  const state = readGoogleOauthState(created.cookieValue, created.state)
+
+  assert.equal(state.userId, TEST_SCOPE.userId)
+  assert.equal(state.workspaceId, TEST_SCOPE.workspaceId)
+  assert.equal(state.environment, 'test')
+  assert.equal(state.calendarId, 'primary')
+  assert.equal(state.sendUpdates, 'externalOnly')
+  assert.doesNotThrow(() => assertGoogleOauthScope(state, TEST_SCOPE))
+
+  assert.throws(
+    () => readGoogleOauthState(created.cookieValue, `${created.state}x`),
+    /state did not match/i,
+  )
+  assert.throws(
+    () => assertGoogleOauthScope(state, { ...TEST_SCOPE, workspaceId: 'ws_other' }),
+    /tenant\/environment does not match/i,
+  )
 })
