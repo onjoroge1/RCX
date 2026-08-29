@@ -2,7 +2,7 @@ import 'server-only'
 
 import { cache } from 'react'
 import { cookies } from 'next/headers'
-import { and, eq, type SQL } from 'drizzle-orm'
+import { and, eq, isNull, type SQL } from 'drizzle-orm'
 import type { PgColumn, PgTable } from 'drizzle-orm/pg-core'
 
 import { db } from './index'
@@ -155,7 +155,7 @@ export const listMyWorkspaces = cache(async () => {
       and(
         eq(workspaceMembers.userId, userId),
         eq(workspaceMembers.status, 'active'),
-        eq(workspaces.suspendedAt, null),
+        isNull(workspaces.suspendedAt),
       ),
     )
 })
