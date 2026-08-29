@@ -34,7 +34,6 @@ export const metadata: Metadata = {
     'rich business messaging',
     'customer conversation platform',
   ],
-  alternates: { canonical: '/' },
   robots: {
     index: true,
     follow: true,
@@ -48,7 +47,6 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: 'website',
-    url: '/',
     siteName: SITE_NAME,
     title: 'RCX — Business RCS journeys that complete customer actions',
     description: SITE_DESCRIPTION,
