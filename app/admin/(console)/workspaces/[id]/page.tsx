@@ -27,31 +27,52 @@ export default async function AdminWorkspaceDetailPage({
     <div>
       <Link href="/admin/workspaces" className="text-sm font-medium text-primary hover:underline">← Workspaces</Link>
 
-      <div className="mt-5 flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-3xl font-semibold tracking-tight">{workspace.name}</h1>
-            <span className={workspace.suspendedAt
-              ? 'rounded-full bg-error/10 px-2 py-1 text-xs font-medium text-error'
-              : 'rounded-full bg-success/10 px-2 py-1 text-xs font-medium text-success'}>
-              {workspace.suspendedAt ? 'Suspended' : 'Active'}
-            </span>
-            {workspace.isDemo && <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Demo</span>}
-          </div>
-          <p className="mt-2 text-sm text-muted-foreground">{workspace.organizationName} · {workspace.slug}</p>
+      <div className="mt-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-3xl font-semibold tracking-tight">{workspace.name}</h1>
+          <span className={workspace.suspendedAt
+            ? 'rounded-full bg-error/10 px-2 py-1 text-xs font-medium text-error'
+            : 'rounded-full bg-success/10 px-2 py-1 text-xs font-medium text-success'}>
+            {workspace.suspendedAt ? 'Suspended' : 'Active'}
+          </span>
+          {workspace.isDemo && <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">Demo</span>}
         </div>
-
-        <form action={mutateWorkspaceStateForm}>
-          <input type="hidden" name="workspaceId" value={workspace.id} />
-          <input type="hidden" name="action" value={workspace.suspendedAt ? 'reactivate' : 'suspend'} />
-          <Button type="submit" variant={workspace.suspendedAt ? 'default' : 'destructive'}>
-            {workspace.suspendedAt ? 'Reactivate workspace' : 'Suspend workspace'}
-          </Button>
-        </form>
+        <p className="mt-2 text-sm text-muted-foreground">{workspace.organizationName} · {workspace.slug}</p>
       </div>
 
       {feedback.error && <div className="mt-5 rounded-lg border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">{feedback.error}</div>}
       {feedback.saved && <div className="mt-5 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm">Workspace state updated and audited.</div>}
+
+      <section className="mt-6 rounded-xl border border-border bg-card p-5 rcx-shadow">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <div>
+            <h2 className="font-semibold">Workspace access control</h2>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+              {workspace.suspendedAt
+                ? 'Reactivation restores access for otherwise-active workspace memberships.'
+                : 'Suspension immediately removes this workspace from usable tenant scope, including existing sessions.'}
+            </p>
+          </div>
+          <form action={mutateWorkspaceStateForm} className="flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:items-end">
+            <input type="hidden" name="workspaceId" value={workspace.id} />
+            <input type="hidden" name="action" value={workspace.suspendedAt ? 'reactivate' : 'suspend'} />
+            <label className="min-w-0 flex-1 text-xs font-medium text-muted-foreground">
+              Reason
+              <input
+                className="builder-input mt-1"
+                name="reason"
+                required
+                minLength={8}
+                maxLength={500}
+                placeholder={workspace.suspendedAt ? 'Reason for restoring tenant access' : 'Reason for suspending tenant access'}
+              />
+            </label>
+            <Button type="submit" variant={workspace.suspendedAt ? 'default' : 'destructive'}>
+              {workspace.suspendedAt ? 'Reactivate workspace' : 'Suspend workspace'}
+            </Button>
+          </form>
+        </div>
+      </section>
 
       <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
