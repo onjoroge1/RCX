@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { startJourneyRun } from '@/lib/journeys/start'
+import { scheduleWorkerDrain } from '@/lib/workers/schedule'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -42,6 +43,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await startJourneyRun(parsed)
+    scheduleWorkerDrain(result.created ? 'journey_started' : 'journey_start_replayed')
     return NextResponse.json(result, { status: result.created ? 202 : 200 })
   } catch (error) {
     return NextResponse.json(
