@@ -1,0 +1,169 @@
+import 'server-only'
+
+import { processIntegrationBatch, type IntegrationWorkerResult } from '@/lib/integrations/worker'
+import { processJourneyBatch, type JourneyWorkerResult } from '@/lib/journeys/worker'
+import { processProviderEventBatch } from '@/lib/messaging/event-worker'
+import { recoverStaleMessagingLocks } from '@/lib/messaging/recovery'
+import { processDispatchBatch, type MessagingWorkerResult } from '@/lib/messaging/worker'
+
+export type ProviderEventWorkerResult = {
+  claimed: number
+  processed: number
+  failed: number
+}
+
+export type WorkerDrainOptions = {
+  batchSize?: number
+  maxPasses?: number
+  timeBudgetMs?: number
+}
+
+export type WorkerDrainResult = {
+  passes: number
+  durationMs: number
+  recoveredMessagingLocks: number
+  claimed: number
+  providerEvents: ProviderEventWorkerResult
+  journeys: JourneyWorkerResult
+  integrations: IntegrationWorkerResult
+  messaging: MessagingWorkerResult
+  exhausted: boolean
+  stoppedByBudget: boolean
+}
+
+const ZERO_PROVIDER_EVENTS: ProviderEventWorkerResult = { claimed: 0, processed: 0, failed: 0 }
+const ZERO_JOURNEYS: JourneyWorkerResult = {
+  recovered: 0,
+  wake: { timers: 0, events: 0, failures: 0 },
+  claimedRuns: 0,
+  steps: 0,
+  completed: 0,
+  failed: 0,
+  waiting: 0,
+}
+const ZERO_INTEGRATIONS: IntegrationWorkerResult = {
+  recovered: 0,
+  claimed: 0,
+  succeeded: 0,
+  retried: 0,
+  failed: 0,
+}
+const ZERO_MESSAGING: MessagingWorkerResult = {
+  claimed: 0,
+  accepted: 0,
+  retried: 0,
+  failed: 0,
+  fallback: 0,
+}
+
+function boundedInt(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return fallback
+  return Math.max(min, Math.min(max, Math.trunc(value!)))
+}
+
+function addProviderEvents(a: ProviderEventWorkerResult, b: ProviderEventWorkerResult): ProviderEventWorkerResult {
+  return { claimed: a.claimed + b.claimed, processed: a.processed + b.processed, failed: a.failed + b.failed }
+}
+
+function addJourneys(a: JourneyWorkerResult, b: JourneyWorkerResult): JourneyWorkerResult {
+  return {
+    recovered: a.recovered + b.recovered,
+    wake: {
+      timers: a.wake.timers + b.wake.timers,
+      events: a.wake.events + b.wake.events,
+      failures: a.wake.failures + b.wake.failures,
+    },
+    claimedRuns: a.claimedRuns + b.claimedRuns,
+    steps: a.steps + b.steps,
+    completed: a.completed + b.completed,
+    failed: a.failed + b.failed,
+    waiting: a.waiting + b.waiting,
+  }
+}
+
+function addIntegrations(a: IntegrationWorkerResult, b: IntegrationWorkerResult): IntegrationWorkerResult {
+  return {
+    recovered: a.recovered + b.recovered,
+    claimed: a.claimed + b.claimed,
+    succeeded: a.succeeded + b.succeeded,
+    retried: a.retried + b.retried,
+    failed: a.failed + b.failed,
+  }
+}
+
+function addMessaging(a: MessagingWorkerResult, b: MessagingWorkerResult): MessagingWorkerResult {
+  return {
+    claimed: a.claimed + b.claimed,
+    accepted: a.accepted + b.accepted,
+    retried: a.retried + b.retried,
+    failed: a.failed + b.failed,
+    fallback: a.fallback + b.fallback,
+  }
+}
+
+/**
+ * Drain the durable RCX worker pipelines in causal order.
+ *
+ * Provider inbox events can wake journeys; journeys can enqueue integration or
+ * message side effects; those side effects can emit events that wake journeys on
+ * the next pass. Every underlying worker retains its own row-level claim/fencing
+ * semantics, so overlapping drain invocations are safe and merely compete for
+ * claimable work rather than duplicating side effects.
+ */
+export async function drainWorkerPipelines(options: WorkerDrainOptions = {}): Promise<WorkerDrainResult> {
+  const batchSize = boundedInt(options.batchSize, 8, 1, 25)
+  const maxPasses = boundedInt(options.maxPasses, 3, 1, 8)
+  const timeBudgetMs = boundedInt(options.timeBudgetMs, 45_000, 5_000, 240_000)
+  const started = Date.now()
+
+  const recoveredMessagingLocks = await recoverStaleMessagingLocks()
+  let providerEvents = { ...ZERO_PROVIDER_EVENTS }
+  let journeys = { ...ZERO_JOURNEYS, wake: { ...ZERO_JOURNEYS.wake } }
+  let integrations = { ...ZERO_INTEGRATIONS }
+  let messaging = { ...ZERO_MESSAGING }
+  let passes = 0
+  let lastPassClaimed = 0
+  let stoppedByBudget = false
+
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    if (Date.now() - started >= timeBudgetMs) {
+      stoppedByBudget = true
+      break
+    }
+
+    const providerPass = await processProviderEventBatch(batchSize)
+    const journeyPass = await processJourneyBatch(batchSize)
+    const integrationPass = await processIntegrationBatch(batchSize)
+    const messagingPass = await processDispatchBatch(batchSize)
+
+    passes += 1
+    providerEvents = addProviderEvents(providerEvents, providerPass)
+    journeys = addJourneys(journeys, journeyPass)
+    integrations = addIntegrations(integrations, integrationPass)
+    messaging = addMessaging(messaging, messagingPass)
+
+    lastPassClaimed =
+      providerPass.claimed +
+      journeyPass.claimedRuns +
+      integrationPass.claimed +
+      messagingPass.claimed
+
+    if (lastPassClaimed === 0) break
+  }
+
+  const claimed =
+    providerEvents.claimed + journeys.claimedRuns + integrations.claimed + messaging.claimed
+
+  return {
+    passes,
+    durationMs: Date.now() - started,
+    recoveredMessagingLocks,
+    claimed,
+    providerEvents,
+    journeys,
+    integrations,
+    messaging,
+    exhausted: lastPassClaimed > 0 && passes >= maxPasses,
+    stoppedByBudget,
+  }
+}
