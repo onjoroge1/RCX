@@ -9,6 +9,7 @@ import { db } from './index'
 import { workspaces, workspaceMembers } from './schema'
 import { users } from './schema'
 import { getUserId } from '@/lib/auth/auth'
+import { isActivePlatformAdmin } from '@/lib/admin/authorization'
 
 export type Environment = 'test' | 'live'
 
@@ -180,7 +181,7 @@ export const requirePlatformAdmin = cache(async (): Promise<PlatformAdminIdentit
     .where(eq(users.id, userId))
     .limit(1)
 
-  if (!user || user.status !== 'active' || !user.isPlatformAdmin) {
+  if (!isActivePlatformAdmin(user)) {
     throw new PlatformAdminRequiredError()
   }
 
