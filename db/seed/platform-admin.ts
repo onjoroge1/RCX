@@ -5,16 +5,26 @@ import { z } from 'zod'
 import { pool, seedDb } from './client'
 import { auditLog, users } from '@/lib/db/schema'
 import { newId } from '@/lib/ids'
+import { platformAdminIdentityEmail, PLATFORM_ADMIN_USERNAME } from '@/lib/admin/login-contract'
+
+const strongAdminPassword = z
+  .string()
+  .min(12, 'PLATFORM_ADMIN_PASSWORD must be at least 12 characters.')
+  .max(200)
+  .refine((value) => /[A-Z]/.test(value), 'PLATFORM_ADMIN_PASSWORD must include an uppercase letter.')
+  .refine((value) => /[a-z]/.test(value), 'PLATFORM_ADMIN_PASSWORD must include a lowercase letter.')
+  .refine((value) => /\d/.test(value), 'PLATFORM_ADMIN_PASSWORD must include a number.')
+  .refine((value) => /[^A-Za-z0-9]/.test(value), 'PLATFORM_ADMIN_PASSWORD must include a symbol.')
 
 const configSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
-  password: z.string().min(16, 'PLATFORM_ADMIN_PASSWORD must be at least 16 characters.'),
+  password: strongAdminPassword,
   name: z.string().trim().min(1).max(120).default('RCX Platform Admin'),
 })
 
 async function main() {
   const parsed = configSchema.safeParse({
-    email: process.env.PLATFORM_ADMIN_EMAIL,
+    email: platformAdminIdentityEmail(process.env.PLATFORM_ADMIN_EMAIL),
     password: process.env.PLATFORM_ADMIN_PASSWORD,
     name: process.env.PLATFORM_ADMIN_NAME || undefined,
   })
@@ -81,6 +91,7 @@ async function main() {
           }
         : null,
       after: {
+        username: PLATFORM_ADMIN_USERNAME,
         name: parsed.data.name,
         status: 'active',
         isPlatformAdmin: true,
@@ -88,7 +99,7 @@ async function main() {
     })
   })
 
-  console.log(`${existing ? 'Updated' : 'Created'} platform admin identity: ${parsed.data.email}`)
+  console.log(`${existing ? 'Updated' : 'Created'} platform admin login: ${PLATFORM_ADMIN_USERNAME}`)
 }
 
 main()
