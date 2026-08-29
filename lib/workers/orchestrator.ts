@@ -19,10 +19,15 @@ export type WorkerDrainOptions = {
   timeBudgetMs?: number
 }
 
+export type MessagingRecoveryResult = {
+  dispatches: number
+  providerEvents: number
+}
+
 export type WorkerDrainResult = {
   passes: number
   durationMs: number
-  recoveredMessagingLocks: number
+  recoveredMessagingLocks: MessagingRecoveryResult
   claimed: number
   providerEvents: ProviderEventWorkerResult
   journeys: JourneyWorkerResult
